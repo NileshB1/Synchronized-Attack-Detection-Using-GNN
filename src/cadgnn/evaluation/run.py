@@ -10,7 +10,7 @@ import pandas as pd
 from cadgnn.config import Config, display_path
 from cadgnn.evaluation.detection_time import time_to_detect
 from cadgnn.evaluation.inference import predict
-from cadgnn.evaluation.metrics import classification_metrics
+from cadgnn.evaluation.metrics import classification_metrics, rates_by_pattern
 from cadgnn.evaluation.report import NOT_EVALUATED, episode_decisions, write_evaluation
 from cadgnn.fusion import build_coordination_model
 from cadgnn.generator import EDGES_FILE, NODES_FILE
@@ -59,6 +59,8 @@ def run_evaluation(
     threshold = checkpoint["threshold"]
     pred = predict(model, test, device=device)
     test_metrics = classification_metrics(pred.y, pred.scores, threshold)
+    patterns = [getattr(g, "pattern", "unknown") for g in test]
+    by_pattern = rates_by_pattern(patterns, pred.y, pred.scores, threshold)
     detection = time_to_detect(model, test, threshold, config.graph.min_episode_events, device)
     # The generator writes its node and edge tables next to the graphs.
     infra = _load_infrastructure(graphs_file.parent)
@@ -84,6 +86,7 @@ def run_evaluation(
         "val_metrics": checkpoint["val_metrics"],
         "test_metrics": test_metrics,
         "time_to_detect": detection,
+        "by_pattern": by_pattern,
         "gate_summary": gate_summary,
         "mean_test_score": float(np.mean(pred.scores)),
         "not_evaluated": NOT_EVALUATED,

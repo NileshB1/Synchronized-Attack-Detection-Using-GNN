@@ -91,6 +91,7 @@ def test_decisions_follow_scores_and_threshold(built, model):
         assert d["true_label"] == ("coordinated" if y == 1 else "coincidental")
         assert d["correct"] == (d["decision"] == d["true_label"])
         assert (d["propagation_path"] is not None) == (d["decision"] == "coordinated")
+        assert d["pattern"] == "unknown"
         assert d["time_window_hours"]["span"] >= 0
         assert 0 < d["temporal_share"] < 1
 
@@ -166,6 +167,14 @@ def test_report_and_files(tmp_path):
         assert section in report
     assert "coordinated_0: vm#0 -> vm#1 (shared: network#0)" in report
     assert "do not show performance on real attack campaigns" in report
+    assert "## Flagged episodes by pattern" not in report
+
+    with_patterns = {**results, "by_pattern": {
+        "fast": {"label": "coordinated", "episodes": 1, "flagged": 1, "flagged_rate": 1.0}
+    }}  # fmt: skip
+    assert "| fast | coordinated | 1 | 1 | 1.000 |" in render_report(with_patterns, decisions)
+    chained = {**results, "model_config": {"architecture": "chained"}}
+    assert "CONTINUUM-style baseline" in render_report(chained, decisions)
 
     paths = write_evaluation(tmp_path / "evaluation", results, decisions)
     assert json.loads(paths["metrics"].read_text())["test_metrics"]["f1"] == 1.0

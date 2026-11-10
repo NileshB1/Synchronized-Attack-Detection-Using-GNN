@@ -80,6 +80,7 @@ def episode_decisions(
 
         record = {
             "episode_id": episode_id,
+            "pattern": getattr(g, "pattern", "unknown"),
             "true_label": LABEL_NAMES[int(predictions.y[i])],
             "decision": LABEL_NAMES[decision],
             "correct": decision == int(predictions.y[i]),
@@ -122,17 +123,43 @@ def _fmt(value, digits: int = 3) -> str:
     return f"{value:.{digits}f}" if isinstance(value, float) else str(value)
 
 
+def render_pattern_table(by_pattern: dict) -> list[str]:
+    """False alarms per coincidental pattern and detections per coordinated one."""
+    if not by_pattern:
+        return []
+    lines = [
+        "## Flagged episodes by pattern",
+        "",
+        "For coincidental patterns the rate is the false alarm rate, for coordinated ones "
+        "the detection rate.",
+        "",
+        "| Pattern | Label | Episodes | Flagged | Rate |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for pattern, row in by_pattern.items():
+        lines.append(
+            f"| {pattern} | {row['label']} | {row['episodes']} | {row['flagged']} | "
+            f"{row['flagged_rate']:.3f} |"
+        )
+    return [*lines, ""]
+
+
 def render_report(results: dict, decisions: list[dict]) -> str:
     test = results["test_metrics"]
     cm = test["confusion_matrix"]
     ttd = results["time_to_detect"]
+    mc = results["model_config"]
+    if mc.get("architecture") == "chained":
+        model = "CONTINUUM-style baseline, a GAT on each snapshot followed by a GRU"
+    else:
+        model = (
+            f"fusion `{mc['fusion']}`, temporal stream {'on' if mc['use_temporal'] else 'off'}, "
+            f"spatial stream {'on' if mc['use_spatial'] else 'off'}"
+        )
     lines = [
         "# Coordination decision report",
         "",
-        f"Model: fusion `{results['model_config']['fusion']}`, "
-        f"temporal stream {'on' if results['model_config']['use_temporal'] else 'off'}, "
-        f"spatial stream {'on' if results['model_config']['use_spatial'] else 'off'}. "
-        f"Seed {results['seed']}.",
+        f"Model: {model}. Seed {results['seed']}.",
         f"Episodes: {results['split_sizes']['train']} train, {results['split_sizes']['val']} "
         f"validation, {results['split_sizes']['test']} test (stratified by label).",
         f"Threshold {test['threshold']:.4f}, chosen on the validation set with strategy "
@@ -161,6 +188,9 @@ def render_report(results: dict, decisions: list[dict]) -> str:
         f"event. Mean {_fmt(ttd['mean_hours_to_detect'])} h, median "
         f"{_fmt(ttd['median_hours_to_detect'])} h after the first flagged event.",
         "",
+    ]
+    lines += render_pattern_table(results.get("by_pattern") or {})
+    lines += [
         "## Decisions",
         "",
         "| Episode | True | Decision | Score | Temporal share | VMs | Span (h) |",
