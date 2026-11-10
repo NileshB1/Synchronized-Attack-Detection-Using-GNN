@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import networkx as nx
 import numpy as np
@@ -136,6 +137,83 @@ def test_coordinated_episodes():
         assert ((gaps >= 5 - 0.12) & (gaps <= 45 + 0.12)).all()
         networks = {neighbours_of_kind(graph, vm, "network")[0] for vm in ep["vm"]}
         assert len(networks) == 1
+
+
+def network_of(graph, vm):
+    return neighbours_of_kind(graph, vm, "network")[0]
+
+
+def overlap_scenario(**settings):
+    return GeneratorConfig(
+        n_vms=300, n_storage=10, n_network=8,
+        n_coincidental_episodes=30, n_coordinated_episodes=30, **settings,
+    )  # fmt: skip
+
+
+def test_lookalike_episodes_share_a_network_and_a_short_window():
+    config = overlap_scenario(coincidental_lookalike_fraction=1.0)
+    dataset = generate(config, PROFILE, seed=4)
+    events = dataset.events
+    for _, ep in events[events["label"] == "coincidental"].groupby("episode_id"):
+        assert len({network_of(dataset.graph, vm) for vm in ep["vm"]}) == 1
+        assert np.ptp(ep["timestamp_hours"]) <= config.coincidental_window_hours[1]
+
+
+def test_burst_episodes_stay_in_a_short_window():
+    config = overlap_scenario(coincidental_burst_fraction=1.0)
+    events = generate(config, PROFILE, seed=5).events
+    for _, ep in events[events["label"] == "coincidental"].groupby("episode_id"):
+        assert np.ptp(ep["timestamp_hours"]) <= config.coincidental_window_hours[1]
+
+
+def test_cluster_episodes_share_a_network():
+    dataset = generate(overlap_scenario(coincidental_cluster_fraction=1.0), PROFILE, seed=6)
+    events = dataset.events
+    for _, ep in events[events["label"] == "coincidental"].groupby("episode_id"):
+        assert len({network_of(dataset.graph, vm) for vm in ep["vm"]}) == 1
+
+
+def test_stealth_campaigns_use_slow_hops_and_stay_observed():
+    config = overlap_scenario(stealth_campaign_fraction=1.0)
+    events = generate(config, PROFILE, seed=7).events
+    for _, ep in events[events["label"] == "coordinated"].groupby("episode_id"):
+        assert ep["timestamp_hours"].max() <= config.observation_hours
+        assert (np.diff(ep["timestamp_hours"]) * 60 >= 120 - 0.12).all()
+
+
+def test_storage_pivots_leave_the_network():
+    g = build_infrastructure(200, 3, 20, np.random.default_rng(3))
+    chain = find_attack_chain(g, "vm_0", 8, np.random.default_rng(4), storage_pivot_probability=1.0)
+    assert len(set(chain)) == len(chain) > 1
+    pools = {
+        neighbours_of_kind(g, neighbours_of_kind(g, vm, "backup_image")[0], "storage")[0]
+        for vm in chain
+    }
+    assert len(pools) == 1
+    assert len({network_of(g, vm) for vm in chain}) > 1
+
+
+def test_missed_events_leave_at_least_two():
+    config = overlap_scenario(missed_event_probability=1.0)
+    events = generate(config, PROFILE, seed=8).events
+    sizes = events[events["label"] != "none"].groupby("episode_id").size()
+    assert (sizes == 2).all()
+
+
+def test_stray_vm_joins_the_episode_with_its_label():
+    plain = generate(overlap_scenario(), PROFILE, seed=9).events
+    noisy = generate(overlap_scenario(stray_vm_probability=1.0), PROFILE, seed=9).events
+    assert (noisy["label"] != "none").sum() > (plain["label"] != "none").sum()
+    attacks = noisy[noisy["label"] != "none"]
+    assert not attacks.duplicated(["episode_id", "vm"]).any()
+    assert (attacks["episode_id"].str.split("_").str[0] == attacks["label"]).all()
+
+
+def test_overlap_settings_do_not_disturb_the_plain_scenario():
+    # Zero shares must make no random draws, or the notebook match would break.
+    a = generate(SMALL, PROFILE, seed=10).events
+    b = generate(replace(SMALL, coincidental_window_hours=(1.0, 2.0)), PROFILE, seed=10).events
+    pd.testing.assert_frame_equal(a, b)
 
 
 def test_generation_is_reproducible():
