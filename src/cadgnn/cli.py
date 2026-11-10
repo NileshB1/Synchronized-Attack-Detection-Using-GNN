@@ -43,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands.add_parser("train", help="train the coordination model and pick the threshold")
     commands.add_parser("evaluate", help="score the held-out test episodes and write the report")
+    commands.add_parser(
+        "baselines", help="fit the rule-based and classic ML baselines on the same split"
+    )
     experiment = commands.add_parser(
         "experiment", help="compare model variants across generator scenarios and seeds"
     )
@@ -82,7 +85,7 @@ def cmd_build_graphs(config: Config) -> int:
     warnings.filterwarnings("ignore", message="`torch.jit.script` is deprecated")
     from cadgnn.graph import (
         GraphConstructionError, build_episode_graphs,
-        episode_summary, load_generator_output,
+        episode_summary, load_episode_patterns, load_generator_output,
         save_episode_graphs
     )
     from cadgnn.graph.episodes import EPISODE_GRAPHS_FILE, EPISODE_SUMMARY_FILE
@@ -90,7 +93,9 @@ def cmd_build_graphs(config: Config) -> int:
     output_dir = config.paths.output_dir
     try:
         infra, events = load_generator_output(output_dir)
-        graphs = build_episode_graphs(infra, events, config.graph.min_episode_events)
+        graphs = build_episode_graphs(
+            infra, events, config.graph.min_episode_events, load_episode_patterns(output_dir)
+        )
     except GraphConstructionError as exc:
         log.error("%s", exc)
         return 1
@@ -162,6 +167,33 @@ def cmd_evaluate(config: Config) -> int:
     return 0
 
 
+def cmd_baselines(config: Config) -> int:
+    warnings.filterwarnings("ignore", message="`torch.jit.script` is deprecated")
+    from cadgnn.baselines.run import run_baselines
+
+    try:
+        found = run_baselines(config)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 1
+
+    def fmt(value):
+        return "n/a" if value is None else f"{value:.3f}"
+
+    first = next(iter(found["results"].values()))
+    sizes = first["split_sizes"]
+    print(f"split: {sizes['train']} train, {sizes['val']} validation, {sizes['test']} test")
+    for name, outcome in found["results"].items():
+        test = outcome["test_metrics"]
+        print(
+            f"{name:<20} f1 {fmt(test['f1'])}  precision {fmt(test['precision'])}  "
+            f"recall {fmt(test['recall'])}  FPR {fmt(test['false_positive_rate'])}  "
+            f"ROC-AUC {fmt(test['roc_auc'])}  PR-AUC {fmt(test['pr_auc'])}"
+        )
+    print(f"  wrote {display_path(found['path'])}")
+    return 0
+
+
 def cmd_experiment(config: Config, spec_path: str, out: str | None) -> int:
     warnings.filterwarnings("ignore", message="`torch.jit.script` is deprecated")
     from cadgnn.experiments import load_spec, run_experiment
@@ -186,7 +218,7 @@ def cmd_experiment(config: Config, spec_path: str, out: str | None) -> int:
     for _, row in summary.iterrows():
         mark = " (selected on validation)" if row["selected"] else ""
         print(
-            f"{row['scenario']:>18} {row['variant']:<16} test F1 {row['test_f1_mean']:.3f}  "
+            f"{row['scenario']:>18} {row['variant']:<20} test F1 {row['test_f1_mean']:.3f}  "
             f"FPR {row['test_fpr_mean']:.3f}{mark}"
         )
     for path in experiment["paths"].values():
@@ -228,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_train(config)
         if args.command == "evaluate":
             return cmd_evaluate(config)
+        if args.command == "baselines":
+            return cmd_baselines(config)
         if args.command == "experiment":
             return cmd_experiment(config, args.spec, args.out)
         if args.command == "params":
