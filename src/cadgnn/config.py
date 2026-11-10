@@ -43,6 +43,25 @@ class GeneratorConfig:
     # Campaigns start no later than observation_hours minus this margin.
     campaign_start_margin_hours: float = 2.0
 
+    # Overlap between the two classes. All off here, which reproduces the notebook;
+    # configs/default.yaml turns them on.
+    # Share of coincidental episodes in a short window on unrelated networks.
+    coincidental_burst_fraction: float = 0.0
+    # Share on a single network but spread over the whole observation period.
+    coincidental_cluster_fraction: float = 0.0
+    # Share on a single network and in a short window, e.g. a patch rollout.
+    coincidental_lookalike_fraction: float = 0.0
+    coincidental_window_hours: tuple[float, float] = (0.5, 6.0)
+    # Share of campaigns that move slowly to stay under the radar.
+    stealth_campaign_fraction: float = 0.0
+    stealth_hop_delay_minutes: tuple[float, float] = (120.0, 720.0)
+    # Chance that a hop goes through a shared storage pool instead of the network.
+    storage_pivot_probability: float = 0.0
+    # Chance that the anomaly detector misses a single event.
+    missed_event_probability: float = 0.0
+    # Chance that one unrelated VM gets grouped into an episode by mistake.
+    stray_vm_probability: float = 0.0
+
     def __post_init__(self) -> None:
         for name in ("n_vms", "n_storage", "n_network"):
             _check_int(getattr(self, name), name, minimum=1)
@@ -73,6 +92,28 @@ class GeneratorConfig:
         largest = self.coincidental_vms[1]
         if self.n_coincidental_episodes and largest > self.n_vms:
             raise ConfigError(f"coincidental_vms upper bound {largest} exceeds n_vms {self.n_vms}")
+
+        for name in (
+            "coincidental_burst_fraction", "coincidental_cluster_fraction",
+            "coincidental_lookalike_fraction", "stealth_campaign_fraction",
+            "storage_pivot_probability", "missed_event_probability", "stray_vm_probability",
+        ):  # fmt: skip
+            _check_number(getattr(self, name), name)
+            if not 0 <= getattr(self, name) <= 1:
+                raise ConfigError(f"{name} must be in [0, 1], got {getattr(self, name)}")
+        shares = (
+            self.coincidental_burst_fraction
+            + self.coincidental_cluster_fraction
+            + self.coincidental_lookalike_fraction
+        )
+        if shares > 1:
+            raise ConfigError(f"coincidental episode fractions add up to {shares}, more than 1")
+        for name in ("coincidental_window_hours", "stealth_hop_delay_minutes"):
+            object.__setattr__(
+                self, name, _check_range(getattr(self, name), name, 0, integer=False)
+            )
+        if self.coincidental_window_hours[1] > self.observation_hours:
+            raise ConfigError("coincidental_window_hours must fit inside observation_hours")
 
 
 @dataclass(frozen=True)
