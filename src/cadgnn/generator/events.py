@@ -11,7 +11,7 @@ add harder cases on top of it, and make no random draws while they are off.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import networkx as nx
 import numpy as np
@@ -38,12 +38,22 @@ EVENT_COLUMNS = [
 ]
 
 
+# How each episode was laid out. The first coincidental and the first coordinated
+# pattern are the notebook's only ones.
+PATTERNS = {
+    "coincidental": ("scattered", "burst", "cluster", "lookalike"),
+    "coordinated": ("fast", "stealth"),
+}
+
+
 @dataclass
 class SyntheticDataset:
     graph: nx.Graph
     events: pd.DataFrame
     config: GeneratorConfig
     seed: int
+    # episode_id -> pattern; random noise (missed or stray events) is not part of it
+    patterns: dict[str, str] = field(default_factory=dict)
 
 
 def make_event(
@@ -114,8 +124,18 @@ def observed_events(
 
 
 def generate_events(
-    graph: nx.Graph, profile: ParamProfile, config: GeneratorConfig, rng: np.random.Generator
+    graph: nx.Graph,
+    profile: ParamProfile,
+    config: GeneratorConfig,
+    rng: np.random.Generator,
+    patterns: dict[str, str] | None = None,
 ) -> pd.DataFrame:
+    """Benign backups plus both kinds of episode, sorted by time.
+
+    If patterns is given it is filled with the pattern of every episode (see
+    PATTERNS), so false alarms can later be broken down by pattern.
+    """
+    patterns = {} if patterns is None else patterns
     vms = vm_nodes(graph)
     if not vms:
         raise ValueError("graph has no VM nodes")
@@ -137,6 +157,7 @@ def generate_events(
         episode_id = f"coincidental_{ep}"
         size = int(rng.integers(low, high + 1))
         pattern = coincidental_pattern(config, rng)
+        patterns[episode_id] = pattern
         if pattern in ("cluster", "lookalike"):
             chosen = vms_on_one_network(graph, vm_array, size, rng)
         else:
@@ -165,6 +186,7 @@ def generate_events(
         stealthy = bool(config.stealth_campaign_fraction) and (
             rng.random() < config.stealth_campaign_fraction
         )
+        patterns[episode_id] = "stealth" if stealthy else "fast"
         delay_low, delay_high = config.hop_delay_minutes
         last_start = latest_start
         if stealthy:
@@ -196,11 +218,12 @@ def generate_events(
 def generate(config: GeneratorConfig, profile: ParamProfile, seed: int) -> SyntheticDataset:
     rng = np.random.default_rng(seed)
     graph = build_infrastructure(config.n_vms, config.n_storage, config.n_network, rng)
-    events = generate_events(graph, profile, config, rng)
+    patterns: dict[str, str] = {}
+    events = generate_events(graph, profile, config, rng, patterns)
     log.info(
         "generated %d events on %d nodes / %d edges (seed %d)",
         len(events),
         graph.number_of_nodes(),
         graph.number_of_edges(), seed
     )
-    return SyntheticDataset(graph=graph, events=events, config=config, seed=seed)
+    return SyntheticDataset(graph, events, config, seed, patterns)

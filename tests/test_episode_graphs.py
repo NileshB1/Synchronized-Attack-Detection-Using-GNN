@@ -17,7 +17,7 @@ from cadgnn.graph import (
     all_edge_types,  anomaly_episodes,
     build_episode_graph,  build_episode_graphs,
     clean_events, episode_summary,
-    load_episode_graphs, load_generator_output,
+    load_episode_graphs, load_episode_patterns, load_generator_output,
     save_episode_graphs
 )
 from cadgnn.graph.schema import reverse
@@ -179,6 +179,21 @@ def test_load_generator_output(generator_output, built):
     assert [g.episode_id for g in graphs] == [g.episode_id for g in expected]
     # Values went through a CSV round trip; the generator rounds to 4 places.
     assert np.allclose(graphs[0]["vm"].x.numpy(), expected[0]["vm"].x.numpy())
+
+
+def test_patterns_reach_the_graphs(generator_output, small_dataset):
+    patterns = load_episode_patterns(generator_output)
+    assert patterns == small_dataset.patterns
+    infra, events = load_generator_output(generator_output)
+    graphs = build_episode_graphs(infra, events, patterns=patterns)
+    assert all(g.pattern == patterns[g.episode_id] for g in graphs)
+    assert set(episode_summary(graphs)["pattern"]) <= {"scattered", "fast"}
+
+
+def test_graphs_without_patterns(tmp_path, built):
+    assert load_episode_patterns(tmp_path) == {}
+    _, _, graphs = built
+    assert {g.pattern for g in graphs} == {"unknown"}
 
 
 def test_load_generator_output_missing_files(tmp_path):

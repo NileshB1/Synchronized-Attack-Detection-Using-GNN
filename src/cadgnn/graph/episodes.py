@@ -20,7 +20,7 @@ import torch
 
 from torch_geometric.data import HeteroData
 
-from cadgnn.generator import EDGES_FILE, NODES_FILE, TELEMETRY_FILE
+from cadgnn.generator import EDGES_FILE, NODES_FILE, PATTERNS_FILE, TELEMETRY_FILE
 from cadgnn.graph.events import anomaly_episodes, clean_events, load_events
 from cadgnn.graph.infrastructure import InfrastructureGraph
 from cadgnn.graph.schema import (
@@ -49,8 +49,17 @@ def load_generator_output(output_dir: str | Path) -> tuple[InfrastructureGraph, 
     return infra, clean_events(load_events(paths[2]), infra)
 
 
+def load_episode_patterns(output_dir: str | Path) -> dict[str, str]:
+    """episode_id -> pattern written by the generator, or {} for older output."""
+    path = Path(output_dir) / PATTERNS_FILE
+    if not path.is_file():
+        return {}
+    table = pd.read_csv(path, dtype=str)
+    return dict(zip(table["episode_id"], table["pattern"], strict=True))
+
+
 def build_episode_graph(
-    infra: InfrastructureGraph, episode: pd.DataFrame, episode_id: str
+    infra: InfrastructureGraph, episode: pd.DataFrame, episode_id: str, pattern: str | None = None
 ) -> HeteroData:
     """Graph for one episode, episode must be sorted by time with one row per VM."""
     labels = episode["label"].unique()
@@ -80,16 +89,23 @@ def build_episode_graph(
 
     data.y = torch.tensor([TARGETS[labels[0]]], dtype=torch.long)
     data.episode_id = episode_id
+    # Only used to break results down by pattern; never a model input.
+    data.pattern = pattern or "unknown"
     return data
 
 
 def build_episode_graphs(
-    infra: InfrastructureGraph, events: pd.DataFrame, min_events: int = 2):
+    infra: InfrastructureGraph,
+    events: pd.DataFrame,
+    min_events: int = 2,
+    patterns: dict[str, str] | None = None,
+):
     """One graph per anomaly episode, in sorted episode id order
 
     Episodes with fewer than min_events events are skipped: a single event
     cannot be called coordinated or coincidental. events should already have been through clean_events
     """
+    patterns = patterns or {}
     if min_events < 1:
         raise ValueError(f"min_events must be at least 1, got {min_events}")
     graphs, skipped = [], 0
@@ -97,7 +113,7 @@ def build_episode_graphs(
         if len(episode) < min_events:
             skipped += 1
             continue
-        graphs.append(build_episode_graph(infra, episode, episode_id))
+        graphs.append(build_episode_graph(infra, episode, episode_id, patterns.get(episode_id)))
     if skipped:
         log.warning("skipped %d episode(s) with fewer than %d events", skipped, min_events)
     if not graphs:
@@ -113,15 +129,37 @@ def episode_summary(graphs: list[HeteroData]) -> pd.DataFrame:
         rows.append(
             {
                 "episode_id": data.episode_id,  "y": int(data.y.item()),
+                "pattern": getattr(data, "pattern", "unknown"),
                 "n_vm": data["vm"].num_nodes, "n_backup_image": data["backup_image"].num_nodes,
                 "n_storage": data["storage"].num_nodes,  "n_network": data["network"].num_nodes,
                 "n_edges": sum(data[et].edge_index.size(1) for et in EDGE_TYPES),
                 "time_span_hours": float(rel.max()) if len(rel) else 0.0, "n_components": _count_components(data)
             }
         )
-    columns = ["episode_id", "y", "n_vm", "n_backup_image", "n_storage", "n_network",
+    columns = ["episode_id", "y", "pattern", "n_vm", "n_backup_image", "n_storage", "n_network",
                "n_edges", "time_span_hours", "n_components"]  # fmt: skip
     return pd.DataFrame(rows, columns=columns)
+
+
+def prefix_graph(graph: HeteroData, k: int) -> HeteroData:
+    """The episode graph as it looked after its first k events."""
+    n = graph["vm"].num_nodes
+    if not 1 <= k <= n:
+        raise ValueError(f"k must be between 1 and {n}, got {k}")
+    vms = torch.nonzero(graph["vm"].event_order < k).flatten()
+
+    def targets(edge_type, sources):
+        edge_index = graph[edge_type].edge_index
+        return torch.unique(edge_index[1, torch.isin(edge_index[0], sources)])
+
+    images = targets(("vm", "has_backup", "backup_image"), vms)
+    subset = {
+        "vm": vms,
+        "backup_image": images,
+        "storage": targets(("backup_image", "stored_on", "storage"), images),
+        "network": targets(("vm", "attached_to", "network"), vms),
+    }
+    return graph.subgraph(subset)
 
 
 def save_episode_graphs(graphs: list[HeteroData], path: str | Path) -> None:

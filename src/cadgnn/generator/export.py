@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,6 +17,7 @@ TELEMETRY_FILE = "synthetic_backup_telemetry.csv"
 NODES_FILE = "infrastructure_graph_nodes.csv"
 EDGES_FILE = "infrastructure_graph_edges.csv"
 MANIFEST_FILE = "experiment_manifest.json"
+PATTERNS_FILE = "episode_patterns.csv"
 
 
 def build_manifest(dataset: SyntheticDataset, calibration: Calibration) -> dict:
@@ -30,6 +32,7 @@ def build_manifest(dataset: SyntheticDataset, calibration: Calibration) -> dict:
         "features": list(profile),  "feature_weights": {name: f.weight for name, f in profile.items()},
         "total_events": len(events),
         "label_counts": {k: int(v) for k, v in events["label"].value_counts().items()},
+        "pattern_counts": dict(sorted(Counter(dataset.patterns.values()).items())),
         "calibration_sources": {
             "ransap": "Real ransomware storage write & Shannon entropy traces",
             "napierone": "Ransomware vs normal file size encryption ratios",
@@ -60,9 +63,13 @@ def save_outputs(
         "telemetry": output_dir / TELEMETRY_FILE,
         "nodes": output_dir / NODES_FILE,  "edges": output_dir / EDGES_FILE,
         "manifest": output_dir / MANIFEST_FILE,
+        "patterns": output_dir / PATTERNS_FILE,
     }
 
     dataset.events.to_csv(paths["telemetry"], index=False)
+    pd.DataFrame(
+        sorted(dataset.patterns.items()), columns=["episode_id", "pattern"]
+    ).to_csv(paths["patterns"], index=False)
     nodes = [{"node_id": n, "kind": d["kind"]} for n, d in dataset.graph.nodes(data=True)]
     pd.DataFrame(nodes, columns=["node_id", "kind"]).to_csv(paths["nodes"], index=False)
     edges = [{"source": u, "target": v} for u, v in dataset.graph.edges()]

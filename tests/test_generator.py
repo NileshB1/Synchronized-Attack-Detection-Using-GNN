@@ -10,7 +10,7 @@ from cadgnn.data.calibration import FeatureProfile, calibrate
 from cadgnn.config import GeneratorConfig
 from cadgnn.generator import (
     EVENT_COLUMNS,  LABELS,
-    NODE_KINDS,
+    NODE_KINDS, PATTERNS,
     build_infrastructure, find_attack_chain,
     generate, generate_events,
     save_outputs, vm_nodes,
@@ -216,6 +216,24 @@ def test_overlap_settings_do_not_disturb_the_plain_scenario():
     pd.testing.assert_frame_equal(a, b)
 
 
+def test_every_episode_gets_a_pattern():
+    config = overlap_scenario(
+        coincidental_burst_fraction=0.3, coincidental_cluster_fraction=0.3,
+        coincidental_lookalike_fraction=0.3, stealth_campaign_fraction=0.5,
+    )  # fmt: skip
+    dataset = generate(config, PROFILE, seed=12)
+    episodes = set(dataset.events["episode_id"].dropna())
+    assert set(dataset.patterns) == episodes
+    for episode_id, pattern in dataset.patterns.items():
+        assert pattern in PATTERNS[episode_id.split("_")[0]]
+    assert len(set(dataset.patterns.values())) == 6
+
+
+def test_plain_scenario_has_only_the_notebook_patterns():
+    patterns = generate(SMALL, PROFILE, seed=1).patterns
+    assert set(patterns.values()) == {"scattered", "fast"}
+
+
 def test_generation_is_reproducible():
     a = generate(SMALL, PROFILE, seed=11)
     b = generate(SMALL, PROFILE, seed=11)
@@ -269,3 +287,6 @@ def test_save_outputs(tmp_path, fake_datasets):
     assert manifest["generator"]["coincidental_vms"] == [3, 6]
     assert manifest["calibration"]["fallbacks"] == []
     assert manifest["features"] == list(calibration.profile)
+    assert sum(manifest["pattern_counts"].values()) == len(dataset.patterns)
+    saved = pd.read_csv(paths["patterns"])
+    assert dict(zip(saved["episode_id"], saved["pattern"], strict=True)) == dataset.patterns
