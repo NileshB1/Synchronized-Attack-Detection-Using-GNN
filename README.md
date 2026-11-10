@@ -63,7 +63,8 @@ events and writes to the output directory:
 | `synthetic_backup_telemetry.csv` | one row per backup event with the four features, weighted `anomaly_score`, `state`, `episode_id` and `label` (`none`, `coincidental`, `coordinated`) |
 | `infrastructure_graph_nodes.csv` | `node_id`, `kind` (`vm`, `backup_image`, `storage`, `network`) |
 | `infrastructure_graph_edges.csv` | `source`, `target` |
-| `experiment_manifest.json` | seed, scenario, calibrated feature ranges and label counts |
+| `experiment_manifest.json` | seed, scenario, calibrated feature ranges, label and pattern counts |
+| `episode_patterns.csv` | `episode_id`, `pattern` (how the generator laid the episode out, see below) |
 
 The generator is a port of `notebooks/random_anomaly_generator_simple.ipynb` and makes its
 random draws in the same order. With the overlap settings below switched off and `--seed 42`, it
@@ -88,7 +89,9 @@ and adds these harder cases:
 | `stray_vm_probability` | 0.20 | one unrelated VM is grouped into the episode |
 
 These values are assumptions chosen to represent plausible behaviour, not measurements from a
-real enterprise. The `no_overlap` scenario in `configs/experiments.yaml` keeps the original easy
+real enterprise. Each episode's pattern is written to `episode_patterns.csv`: `scattered`
+(the notebook's coincidental episodes), `burst`, `cluster` or `lookalike` for coincidental ones,
+and `fast` or `stealth` for campaigns. The `no_overlap` scenario in `configs/experiments.yaml` keeps the original easy
 setup for comparison.
 
 ## Building the episode graphs
@@ -197,10 +200,45 @@ model and training config, seed, threshold and the episode ids of each split.
 | `decisions.json` | per test episode: score, threshold, decision, true label, temporal share, VMs in event order, time window, shared networks and storage, and for flagged episodes the step-by-step propagation evidence |
 | `decision_report.md` | the same results as a readable report |
 
+`metrics.json` and the report also break the test results down by the generator pattern of each
+episode (`episode_patterns.csv`, written by the generator): the false alarm rate for scattered,
+burst, cluster and lookalike coincidental episodes, and the detection rate for fast and stealth
+campaigns. The pattern is only used for this breakdown and is never a model input.
+
 Time to detect replays each coordinated test episode event by event and records when its score
 first reaches the threshold. Structural path similarity, severity metrics and probability
 calibration are not evaluated; the report lists why. Scores are uncalibrated, and all results
 come from synthetic episodes.
+
+## Baselines
+
+```bash
+python run_baselines.py
+```
+
+The baselines are scored on the same train / validation / test split as `run_training.py`
+(same seed and fractions), with the same metrics and the same threshold rule, so their numbers
+can be put next to `run_evaluation.py`. Results go to `baselines/metrics.json`.
+
+| Baseline | What it is |
+| --- | --- |
+| `rule_based` | SIEM-style correlation rule: consecutive flagged events are linked when their VMs share a network or storage pool and are at most W hours apart; the score is the share of linked steps |
+| `logistic_regression` | scikit-learn logistic regression on 17 episode features (counts of VMs, networks and pools, shared-resource shares, time span and gaps, mean telemetry) |
+| `random_forest` | scikit-learn random forest on the same features |
+| `continuum_style` | CONTINUUM-style GNN (Bahar et al., 2025), set with `model.architecture: chained` |
+
+The settings of the first three (W, the regularisation strength, tree depth and leaf size) are
+chosen by validation ROC-AUC from small fixed grids, and the threshold on validation, as for the
+GNN. Class weights are balanced to match the weighted loss.
+
+`continuum_style` follows the base paper's encoder: a GAT over each snapshot of the episode, the
+mean of the node embeddings per snapshot, then a GRU across the snapshots. A snapshot is the
+episode graph after each of its events. It is trained and evaluated exactly like the dual-stream
+model. Differences from the paper, so both run on the same task: it is trained on labels instead
+of as an autoencoder with k-nearest-neighbour distances to benign graphs, the attention has no
+edge features (the episode graphs have none), the hours since the first event go to the GRU with
+each snapshot because snapshots follow events rather than fixed time intervals, and there is no
+federated learning.
 
 ## Experiments: ablations, baselines and scenarios
 
@@ -209,19 +247,28 @@ python run_experiments.py
 python run_experiments.py --spec configs/experiments.yaml --out runs/comparison
 ```
 
-`configs/experiments.yaml` lists seeds, generator scenarios and model variants. Every variant is
-trained and evaluated on every scenario and seed, with each run under
-`<out>/<scenario>/seed_<n>/<variant>/`:
+`configs/experiments.yaml` lists seeds, generator scenarios, model variants and baselines. Every
+variant and baseline is run on every scenario and seed, on the same split, with each run under
+`<out>/<scenario>/seed_<n>/<variant>/` and the baselines under `<out>/<scenario>/seed_<n>/baselines/`:
 
-- variants switch a stream off (`temporal_only`, `spatial_only` baselines), change the fusion
-  method (`concat`) or change one setting at a time (ablation);
-- scenarios change the generator, either to fixed values (for example slower campaigns or fewer
-  network fabrics) or, under `randomize`, to values drawn again for every seed (domain
-  randomisation).
+- variants switch a stream off (`temporal_only`, `spatial_only`), change the fusion method
+  (`concat`), or use the base paper's design (`continuum_style`);
+- `baselines` lists the non-graph baselines (`rule_based`, `logistic_regression`, `random_forest`);
+- scenarios change the generator: `default` uses `configs/default.yaml`, `no_overlap` is the
+  notebook's easy setup, `slow_campaigns` makes every campaign slow, `crowded_networks` uses only
+  10 network fabrics, and `randomised` draws the network and episode counts again for every seed
+  (domain randomisation).
+
+The default spec has 5 scenarios, 5 seeds, 5 variants and 3 baselines; on a CPU it takes a few
+hours, most of it for `continuum_style`.
 
 `results.csv` has one row per run, `summary.csv` and `summary.md` the mean and standard deviation
-over seeds. The variant marked as selected per scenario has the best mean validation F1; test
-results are reported but never used to choose.
+over seeds, and the share of test episodes flagged per generator pattern. The variant marked as
+selected per scenario has the best mean validation F1; test results are reported but never used
+to choose. Each model is compared with the first variant (`gated`) by a two-tailed paired t-test
+over seeds on test F1 and ROC-AUC, as in Euler (King and Huang, 2022). No correction for
+multiple comparisons is applied, and with 5 seeds the test has little power, so a high p-value
+does not show that two models are equal.
 
 ### Tunable settings
 
@@ -230,6 +277,7 @@ results are reported but never used to choose.
 | Setting | Component | Controls | Default | Current | Values to try |
 | --- | --- | --- | --- | --- | --- |
 | `graph.min_episode_events` | graph construction | smallest episode turned into a graph | 2 | 2 | 2, 3 |
+| `model.architecture` | baseline | dual_stream, or the CONTINUUM-style chained GAT then GRU | dual_stream | dual_stream | dual_stream, chained |
 | `model.hidden_dim` | both streams | width of node and sequence representations | 64 | 64 | 32, 64, 128 |
 | `model.temporal_dim` | temporal stream | size of the temporal episode vector | 64 | 64 | 32, 64 |
 | `model.spatial_dim` | spatial stream | size of the spatial episode vector | 64 | 64 | 32, 64 |
@@ -259,6 +307,7 @@ run_generator.py      entry point for the random anomaly generator
 run_graph_builder.py  entry point for building the episode graphs
 run_training.py       entry point for training and threshold selection
 run_evaluation.py     entry point for the held-out evaluation and decision report
+run_baselines.py      entry point for the rule-based and classic ML baselines
 run_experiments.py    entry point for the comparison experiments
 configs/              run configurations
 notebooks/            reference notebook for the random anomaly generator (kept unchanged)
@@ -270,6 +319,7 @@ src/cadgnn/
   temporal/           temporal severity stream
   spatial/            spatial topology stream
   fusion/             fusion layers, coordination model and loss
+  baselines/          CONTINUUM-style model, episode features, rule-based and classic ML baselines
   training/           stratified split, training loop, training run
   evaluation/         metrics, thresholds, time to detect, decision report
   experiments/        experiment specs, runner, summaries, parameter table
