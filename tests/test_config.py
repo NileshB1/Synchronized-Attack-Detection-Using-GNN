@@ -97,8 +97,23 @@ def test_generator_defaults_match_reference_notebook():
     assert g.campaign_start_margin_hours == 2
 
 
-def test_repo_default_config_uses_generator_defaults():
-    assert load_config(REPO_ROOT / "configs" / "default.yaml").generator == GeneratorConfig()
+def test_generator_overlap_settings_are_off_by_default():
+    g = GeneratorConfig()
+    assert g.coincidental_burst_fraction == 0
+    assert g.coincidental_cluster_fraction == 0
+    assert g.coincidental_lookalike_fraction == 0
+    assert g.stealth_campaign_fraction == 0
+    assert g.storage_pivot_probability == 0
+    assert g.missed_event_probability == 0
+    assert g.stray_vm_probability == 0
+
+
+def test_repo_default_config_turns_on_class_overlap():
+    g = load_config(REPO_ROOT / "configs" / "default.yaml").generator
+    assert (g.n_coincidental_episodes, g.n_coordinated_episodes) == (400, 200)
+    assert g.coincidental_lookalike_fraction > 0
+    assert g.stealth_campaign_fraction > 0
+    assert (g.n_vms, g.n_storage, g.n_network) == (12000, 300, 200)
 
 
 def test_generator_section_overrides_and_lists_become_tuples(tmp_path):
@@ -126,6 +141,16 @@ def test_generator_section_overrides_and_lists_become_tuples(tmp_path):
         ({"coordinated_chain_length": (1.5, 3)}, "integer"),
         ({"hop_delay_minutes": (-1, 5)}, "at least 0"),
         ({"n_vms": 4, "coincidental_vms": (3, 6)}, "exceeds n_vms"),
+        ({"stealth_campaign_fraction": 1.5}, r"must be in \[0, 1\]"),
+        ({"missed_event_probability": -0.1}, r"must be in \[0, 1\]"),
+        ({"stray_vm_probability": "high"}, "number"),
+        (
+            {"coincidental_burst_fraction": 0.6, "coincidental_cluster_fraction": 0.6},
+            "add up to",
+        ),
+        ({"coincidental_window_hours": (5, 1)}, "greater than high"),
+        ({"coincidental_window_hours": (1, 100)}, "inside observation_hours"),
+        ({"stealth_hop_delay_minutes": (-5, 60)}, "at least 0"),
     ],
 )
 def test_invalid_generator_config(kwargs, message):

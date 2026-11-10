@@ -5,6 +5,18 @@ seeds: [1, 2, 3]
 scenarios:
   # Generator settings from default.yaml.
   default: {}
+  # The notebook's scenario, where the two classes do not overlap at all.
+  no_overlap:
+    generator:
+      n_coincidental_episodes: 100
+      n_coordinated_episodes: 50
+      coincidental_burst_fraction: 0
+      coincidental_cluster_fraction: 0
+      coincidental_lookalike_fraction: 0
+      stealth_campaign_fraction: 0
+      storage_pivot_probability: 0
+      missed_event_probability: 0
+      stray_vm_probability: 0
   # Campaign hops hours apart instead of minutes, so timing alone separates less.
   slow_campaigns:
     generator:
