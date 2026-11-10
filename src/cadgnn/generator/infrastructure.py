@@ -40,14 +40,42 @@ def vm_nodes(graph: nx.Graph) -> list[str]:
     return sorted(n for n, d in graph.nodes(data=True) if d["kind"] == "vm")
 
 
+def vms_on_one_network(
+    graph: nx.Graph, vms: np.ndarray, size: int, rng: np.random.Generator
+) -> np.ndarray:
+    """Up to size VMs from the network of one randomly chosen VM."""
+    first = str(rng.choice(vms))
+    network = next(n for n in graph.neighbors(first) if graph.nodes[n]["kind"] == "network")
+    members = sorted(n for n in graph.neighbors(network) if graph.nodes[n]["kind"] == "vm")
+    return rng.choice(members, size=min(size, len(members)), replace=False)
+
+
+def _vms_on_same_storage(graph: nx.Graph, vm: str) -> set[str]:
+    return {
+        other_vm
+        for image in graph.neighbors(vm)
+        if graph.nodes[image]["kind"] == "backup_image"
+        for pool in graph.neighbors(image)
+        if graph.nodes[pool]["kind"] == "storage"
+        for other_image in graph.neighbors(pool)
+        for other_vm in graph.neighbors(other_image)
+        if graph.nodes[other_vm]["kind"] == "vm"
+    }
+
+
 def find_attack_chain(
-    graph: nx.Graph, start_vm: str, n_vms: int, rng: np.random.Generator
+    graph: nx.Graph,
+    start_vm: str,
+    n_vms: int,
+    rng: np.random.Generator,
+    storage_pivot_probability: float = 0.0,
 ) -> list[str]:
     """Random walk over unvisited VMs that are two edges apart.
 
     With the graph from build_infrastructure, the only VM-to-VM paths of length
-    two pass through a shared network fabric. The chain stops early when the
-    current VM has no unvisited neighbour.
+    two pass through a shared network fabric. With storage_pivot_probability set,
+    a hop may instead reach a VM whose backup image is on the same storage pool.
+    The chain stops early when the current VM has no unvisited neighbour.
     """
     if n_vms < 1:
         raise ValueError(f"chain length must be at least 1, got {n_vms}")
@@ -55,7 +83,10 @@ def find_attack_chain(
     visited = {start_vm}
     current = start_vm
     for _ in range(n_vms - 1):
-        candidates = {
+        candidates = set()
+        if storage_pivot_probability and rng.random() < storage_pivot_probability:
+            candidates = _vms_on_same_storage(graph, current) - visited
+        candidates = candidates or {
             n2
             for n1 in graph.neighbors(current)
             for n2 in graph.neighbors(n1)
