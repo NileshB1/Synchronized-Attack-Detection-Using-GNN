@@ -1,6 +1,11 @@
-from cadgnn.evaluation.detection_time import prefix_graph, time_to_detect
+from cadgnn.evaluation.detection_time import detection_times, prefix_graph, time_to_detect
 from cadgnn.evaluation.inference import Predictions, predict
-from cadgnn.evaluation.metrics import MetricsError, classification_metrics, select_threshold
+from cadgnn.evaluation.metrics import (
+    MetricsError,
+    classification_metrics,
+    rates_by_pattern,
+    select_threshold,
+)
 from cadgnn.evaluation.report import (
     NOT_EVALUATED,
     episode_decisions,
@@ -9,7 +14,7 @@ from cadgnn.evaluation.report import (
 )
 
 __all__ = [
-    "prefix_graph", "time_to_detect", "Predictions", "predict",
-    "MetricsError", "classification_metrics", "select_threshold",
+    "detection_times", "prefix_graph", "time_to_detect", "Predictions", "predict",
+    "MetricsError", "classification_metrics", "rates_by_pattern", "select_threshold",
     "NOT_EVALUATED", "episode_decisions", "render_report", "write_evaluation",
 ]  # fmt: skip

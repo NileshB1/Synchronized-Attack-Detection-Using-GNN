@@ -9,7 +9,7 @@ episodes, so very short prefixes are outside what it saw in training.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import torch
@@ -17,27 +17,10 @@ from torch_geometric.data import HeteroData
 
 from cadgnn.evaluation.inference import predict
 from cadgnn.fusion import CoordinationModel
+from cadgnn.graph import prefix_graph
 
-
-def prefix_graph(graph: HeteroData, k: int) -> HeteroData:
-    """The episode graph as it looked after its first k events."""
-    n = graph["vm"].num_nodes
-    if not 1 <= k <= n:
-        raise ValueError(f"k must be between 1 and {n}, got {k}")
-    vms = torch.nonzero(graph["vm"].event_order < k).flatten()
-
-    def targets(edge_type, sources):
-        edge_index = graph[edge_type].edge_index
-        return torch.unique(edge_index[1, torch.isin(edge_index[0], sources)])
-
-    images = targets(("vm", "has_backup", "backup_image"), vms)
-    subset = {
-        "vm": vms,
-        "backup_image": images,
-        "storage": targets(("backup_image", "stored_on", "storage"), images),
-        "network": targets(("vm", "attached_to", "network"), vms),
-    }
-    return graph.subgraph(subset)
+# Takes episode graphs, returns one score per graph.
+Scorer = Callable[[list[HeteroData]], np.ndarray]
 
 
 def time_to_detect(
@@ -48,6 +31,16 @@ def time_to_detect(
     device: torch.device | str = "cpu",
 ) -> dict:
     """Detection times for the coordinated episodes in ``graphs``."""
+    return detection_times(
+        lambda prefixes: predict(model, prefixes, device=device).scores,
+        graphs, threshold, min_events,
+    )  # fmt: skip
+
+
+def detection_times(
+    score: Scorer, graphs: Sequence[HeteroData], threshold: float, min_events: int = 2
+) -> dict:
+    """Same replay for any scorer, so the baselines are timed the same way."""
     campaigns = [g for g in graphs if int(g.y) == 1]
     prefixes, owners = [], []
     for g in campaigns:
@@ -64,10 +57,10 @@ def time_to_detect(
             "episodes": [],
         }
 
-    scores = predict(model, prefixes, device=device).scores
+    scores = score(prefixes)
     first_hit: dict[str, int] = {}
-    for (episode_id, k), score in zip(owners, scores, strict=True):
-        if score >= threshold and episode_id not in first_hit:
+    for (episode_id, k), value in zip(owners, scores, strict=True):
+        if value >= threshold and episode_id not in first_hit:
             first_hit[episode_id] = k
 
     episodes = []

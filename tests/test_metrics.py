@@ -2,7 +2,12 @@ import numpy as np
 import pytest
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from cadgnn.evaluation import MetricsError, classification_metrics, select_threshold
+from cadgnn.evaluation import (
+    MetricsError,
+    classification_metrics,
+    rates_by_pattern,
+    select_threshold,
+)
 
 Y = [1, 1, 1, 0, 0, 0, 0, 0]
 SCORES = [0.9, 0.8, 0.3, 0.6, 0.2, 0.1, 0.05, 0.4]
@@ -89,6 +94,19 @@ def test_fpr_strategy_falls_back_to_flagging_nothing():
     # while catching anything; the threshold ends above every score.
     threshold = select_threshold([1, 0], [0.3, 0.8], "fpr", max_fpr=0.0)
     assert classification_metrics([1, 0], [0.3, 0.8], threshold)["confusion_matrix"]["fp"] == 0
+
+
+def test_rates_by_pattern():
+    patterns = ["fast", "fast", "stealth", "lookalike", "scattered", "scattered", "burst", "burst"]
+    rates = rates_by_pattern(patterns, Y, SCORES, threshold=0.5)
+    assert rates["fast"] == {"label": "coordinated", "episodes": 2, "flagged": 2,
+                             "flagged_rate": 1.0}  # fmt: skip
+    assert rates["stealth"]["flagged_rate"] == 0.0
+    assert rates["lookalike"] == {"label": "coincidental", "episodes": 1, "flagged": 1,
+                                  "flagged_rate": 1.0}  # fmt: skip
+    assert rates["burst"]["flagged_rate"] == 0.0
+    with pytest.raises(MetricsError, match="one pattern per episode"):
+        rates_by_pattern(patterns[:3], Y, SCORES, 0.5)
 
 
 def test_threshold_needs_both_classes_and_a_known_strategy():

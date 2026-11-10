@@ -73,6 +73,29 @@ def classification_metrics(y_true, scores, threshold: float) -> dict:
     }
 
 
+def rates_by_pattern(patterns, y_true, scores, threshold: float) -> dict:
+    """Share of episodes flagged for each generator pattern.
+
+    For a coincidental pattern this is its false alarm rate, for a coordinated
+    one its detection rate. It shows which kinds of episode cause the errors.
+    """
+    y, s = _check_inputs(y_true, scores)
+    patterns = np.asarray(patterns, dtype=object)
+    if len(patterns) != len(y):
+        raise MetricsError("need one pattern per episode")
+    rates = {}
+    for pattern in sorted(set(patterns)):
+        mask = patterns == pattern
+        flagged = int((s[mask] >= threshold).sum())
+        rates[pattern] = {
+            "label": "coordinated" if y[mask].mean() >= 0.5 else "coincidental",
+            "episodes": int(mask.sum()),
+            "flagged": flagged,
+            "flagged_rate": flagged / int(mask.sum()),
+        }
+    return rates
+
+
 def select_threshold(y_true, scores, strategy: str = "f1", max_fpr: float = 0.1) -> float:
     """Choose a decision threshold from validation scores.
 

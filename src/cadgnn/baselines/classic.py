@@ -1,0 +1,115 @@
+"""Rule-based correlation and classic machine learning baselines.
+
+All of them see the same train / validation / test split as the GNN. Their few
+settings are chosen by ROC-AUC on the validation part, the threshold is chosen
+on the validation part as for the GNN, and the test part is scored once.
+
+- rule_based: a SIEM-style correlation rule. Two consecutive flagged events are
+  linked when their VMs share a network or a storage pool and they are at most
+  W hours apart; the score is the share of linked steps. W is the setting.
+- logistic_regression and random_forest: scikit-learn models on the episode
+  features in cadgnn.baselines.features, with balanced class weights to match
+  the weighted loss of the GNN.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from itertools import product
+
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from torch_geometric.data import HeteroData
+
+from cadgnn.baselines.features import feature_matrix, labels, steps
+
+BASELINES = ("rule_based", "logistic_regression", "random_forest")
+RULE_WINDOWS_HOURS = (0.25, 0.5, 1, 2, 4, 8, 12, 24, 48)
+LOGISTIC_C = (0.01, 0.1, 1.0, 10.0)
+FOREST_GRID = {"max_depth": (None, 4, 8), "min_samples_leaf": (1, 5)}
+
+
+@dataclass
+class FittedBaseline:
+    name: str
+    score: Callable[[Sequence[HeteroData]], np.ndarray]
+    settings: dict = field(default_factory=dict)
+
+
+def rule_scores(graphs: Sequence[HeteroData], window_hours: float) -> np.ndarray:
+    scores = []
+    for g in graphs:
+        step = steps(g)
+        linked = step.shared & (step.gaps <= window_hours)
+        scores.append(float(linked.mean()) if len(linked) else 0.0)
+    return np.array(scores)
+
+
+def _auc(y: np.ndarray, scores: np.ndarray) -> float:
+    return float(roc_auc_score(y, scores)) if len(np.unique(y)) == 2 else 0.5
+
+
+def _pick(candidates, val_y: np.ndarray):
+    """The candidate with the best validation ROC-AUC; the first one wins a tie."""
+    best, best_auc = None, -1.0
+    for settings, score in candidates:
+        auc = _auc(val_y, score)
+        if auc > best_auc:
+            best, best_auc = (settings, score), auc
+    return best[0], best_auc
+
+
+def fit_baseline(
+    name: str, train: Sequence[HeteroData], val: Sequence[HeteroData], seed: int
+) -> FittedBaseline:
+    if name not in BASELINES:
+        raise ValueError(f"unknown baseline {name!r}, choose from {', '.join(BASELINES)}")
+    val_y = labels(val)
+
+    if name == "rule_based":
+        candidates = [({"window_hours": w}, rule_scores(val, w)) for w in RULE_WINDOWS_HOURS]
+        settings, auc = _pick(candidates, val_y)
+        window = settings["window_hours"]
+        return FittedBaseline(
+            name, lambda gs: rule_scores(gs, window), {**settings, "val_roc_auc": auc}
+        )
+
+    x_train, y_train = feature_matrix(train), labels(train)
+    x_val = feature_matrix(val)
+    if name == "logistic_regression":
+        options = [{"C": c} for c in LOGISTIC_C]
+
+        def make(options):
+            return make_pipeline(
+                StandardScaler(),
+                LogisticRegression(class_weight="balanced", max_iter=5000, **options),
+            )
+    else:
+        options = [
+            dict(zip(FOREST_GRID, values, strict=True))
+            for values in product(*FOREST_GRID.values())
+        ]
+
+        def make(options):
+            return RandomForestClassifier(
+                n_estimators=300, class_weight="balanced", random_state=seed, n_jobs=-1, **options
+            )
+
+    fitted = {}
+    candidates = []
+    for i, opts in enumerate(options):
+        model = make(opts).fit(x_train, y_train)
+        fitted[i] = model
+        candidates.append(({"index": i, **opts}, model.predict_proba(x_val)[:, 1]))
+    settings, auc = _pick(candidates, val_y)
+    model = fitted[settings.pop("index")]
+
+    def score(graphs: Sequence[HeteroData]) -> np.ndarray:
+        return model.predict_proba(feature_matrix(graphs))[:, 1]
+
+    return FittedBaseline(name, score, {**settings, "val_roc_auc": auc})
