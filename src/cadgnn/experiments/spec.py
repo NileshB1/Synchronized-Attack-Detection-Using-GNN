@@ -1,4 +1,4 @@
-"""Experiment specification: seeds x generator scenarios x model variants.
+"""Experiment specification: seeds x generator scenarios x model variants and baselines.
 
 A scenario changes the generator (fixed values under ``generator`` and/or
 ranges under ``randomize`` that are sampled again for every seed). A variant
@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 import yaml
 
+from cadgnn.baselines.classic import BASELINES
 from cadgnn.config import Config, ConfigError, GeneratorConfig, ModelConfig, TrainingConfig
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -53,6 +54,13 @@ class ExperimentSpec:
     seeds: list[int]
     scenarios: list[Scenario]
     variants: list[Variant]
+    # Non-graph baselines from cadgnn.baselines, run on the same split as the variants.
+    baselines: list[str] = field(default_factory=list)
+
+    @property
+    def reference(self) -> str:
+        """The variant every other result is tested against: the first one listed."""
+        return self.variants[0].name
 
 
 def load_spec(path: str | Path, base: Config) -> ExperimentSpec:
@@ -69,7 +77,7 @@ def load_spec(path: str | Path, base: Config) -> ExperimentSpec:
 def parse_spec(raw: dict, base: Config) -> ExperimentSpec:
     if not isinstance(raw, dict):
         raise ConfigError("experiment spec must be a mapping")
-    unknown = set(raw) - {"seeds", "scenarios", "variants"}
+    unknown = set(raw) - {"seeds", "scenarios", "variants", "baselines"}
     if unknown:
         raise ConfigError(f"unknown key(s) in experiment spec: {', '.join(sorted(unknown))}")
 
@@ -91,7 +99,16 @@ def parse_spec(raw: dict, base: Config) -> ExperimentSpec:
         Variant(name, **_section(body, name, {"model", "training"}))
         for name, body in _named(raw.get("variants", {"default": {}}), "variants")
     ]
-    spec = ExperimentSpec(seeds, scenarios, variants)
+    baselines = raw.get("baselines", [])
+    if not isinstance(baselines, list) or len(set(baselines)) != len(baselines):
+        raise ConfigError("baselines must be a list of names without repeats")
+    for name in baselines:
+        if name not in BASELINES:
+            raise ConfigError(f"unknown baseline {name!r}, choose from {', '.join(BASELINES)}")
+    clash = set(baselines) & {v.name for v in variants}
+    if clash:
+        raise ConfigError(f"variant name(s) {', '.join(sorted(clash))} are taken by baselines")
+    spec = ExperimentSpec(seeds, scenarios, variants, baselines)
 
     # Build every configuration once now, so a typo fails before hours of training.
     for scenario in scenarios:

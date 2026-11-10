@@ -1,8 +1,10 @@
+import math
 from dataclasses import fields
 
 import pandas as pd
 import pytest
 import yaml
+from scipy import stats
 
 from cadgnn.cli import main
 from cadgnn.config import ConfigError, GraphConfig, ModelConfig, TrainingConfig, parse_config
@@ -18,6 +20,7 @@ from cadgnn.experiments import (
     summarise,
     variant_config,
 )
+from cadgnn.experiments.summary import paired_p_value
 from conftest import REPO_ROOT
 
 TINY = {
@@ -39,8 +42,10 @@ def base_config(tmp_path, datasets=None):
 def test_repository_spec_is_valid(tmp_path):
     spec = load_spec(REPO_ROOT / "configs" / "experiments.yaml", base_config(tmp_path))
     names = [v.name for v in spec.variants]
-    assert {"gated", "concat", "temporal_only", "spatial_only"} <= set(names)
-    assert len(spec.seeds) >= 2
+    assert {"gated", "concat", "temporal_only", "spatial_only", "continuum_style"} <= set(names)
+    assert spec.reference == "gated"
+    assert set(spec.baselines) == {"rule_based", "logistic_regression", "random_forest"}
+    assert len(spec.seeds) >= 5
 
 
 def test_defaults_when_sections_are_missing(tmp_path):
@@ -145,19 +150,84 @@ def test_summary_report(tmp_path):
         summarise(pd.DataFrame())
 
 
+def test_spec_baselines_and_reference(tmp_path):
+    base = base_config(tmp_path)
+    spec = parse_spec(
+        {"variants": {"gated": {}, "concat": {"model": {"fusion": "concat"}}},
+         "baselines": ["rule_based", "random_forest"]},
+        base,
+    )  # fmt: skip
+    assert spec.baselines == ["rule_based", "random_forest"]
+    assert spec.reference == "gated"
+    assert parse_spec({}, base).baselines == []
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ({"baselines": ["svm"]}, "unknown baseline"),
+        ({"baselines": "rule_based"}, "list of names"),
+        ({"baselines": ["rule_based", "rule_based"]}, "without repeats"),
+        ({"variants": {"rule_based": {}}, "baselines": ["rule_based"]}, "taken by baselines"),
+        ({"variants": {"v": {"model": {"architecture": "rnn"}}}}, "architecture"),
+    ],
+)  # fmt: skip
+def test_invalid_baselines(tmp_path, raw, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_spec(raw, base_config(tmp_path))
+
+
+def test_paired_p_value():
+    a = pd.Series([0.80, 0.82, 0.85, 0.79, 0.81], index=[1, 2, 3, 4, 5])
+    b = pd.Series([0.70, 0.75, 0.72, 0.71, 0.74], index=[1, 2, 3, 4, 5])
+    assert paired_p_value(a, b) == pytest.approx(stats.ttest_rel(a, b).pvalue)
+    assert paired_p_value(a, a) == 1.0
+    assert math.isnan(paired_p_value(a, a - 0.1))
+    assert math.isnan(paired_p_value(a.iloc[:1], b.iloc[:1]))
+    # Only seeds both models ran on are paired.
+    assert paired_p_value(a, b.iloc[:2]) == pytest.approx(stats.ttest_rel(a[:2], b[:2]).pvalue)
+
+
+def test_summary_tests_against_the_reference_and_lists_patterns(tmp_path):
+    results = fake_results()
+    results["kind"] = "gnn"
+    # Rows are seed 1 a, seed 1 b, seed 2 a, seed 2 b.
+    results["rate_lookalike"] = [0.5, 0.25, 0.25, 0.25]
+    summary = summarise(results, reference="a")
+    a = summary[summary["variant"] == "a"].iloc[0]
+    b = summary[summary["variant"] == "b"].iloc[0]
+    assert math.isnan(a["p_test_f1"])
+    assert math.isnan(b["p_test_f1"])  # b is always 0.2 below a: a constant difference
+    assert b["p_test_roc_auc"] == 1.0
+    assert a["rate_lookalike_mean"] == pytest.approx(0.375)
+    spec = parse_spec({"seeds": [1, 2]}, base_config(tmp_path))
+    text = render_summary(summary, spec)
+    assert "paired t-test over seeds against `a`" in text
+    assert "| Model | lookalike |" in text
+
+
 def test_run_experiment_end_to_end(tmp_path, fake_datasets):
     base = base_config(tmp_path, fake_datasets)
     spec = parse_spec(
         {"seeds": [1], "scenarios": {"plain": {}},
-         "variants": {"gated": {}, "temporal_only": {"model": {"use_spatial": False}}}},
+         "variants": {"gated": {}, "temporal_only": {"model": {"use_spatial": False}},
+                      "continuum_style": {"model": {"architecture": "chained"}}},
+         "baselines": ["rule_based", "logistic_regression"]},
         base,
     )  # fmt: skip
     out = tmp_path / "exp"
     experiment = run_experiment(base, spec, out)
     results = experiment["results"]
-    assert list(results["variant"]) == ["gated", "temporal_only"]
+    assert list(results["variant"]) == [
+        "gated", "temporal_only", "continuum_style", "rule_based", "logistic_regression"
+    ]  # fmt: skip
+    assert list(results["kind"]) == ["gnn"] * 3 + ["baseline"] * 2
     assert results["test_f1"].notna().all()
-    for variant in ("gated", "temporal_only"):
+    assert results["rate_scattered"].notna().all()
+    # Every model is tested on the same episodes.
+    assert results["n_episodes"].nunique() == 1
+    assert (out / "plain" / "seed_1" / "baselines" / "metrics.json").is_file()
+    for variant in ("gated", "temporal_only", "continuum_style"):
         run_dir = out / "plain" / "seed_1" / variant
         assert (run_dir / "model" / "coordination_model.pt").is_file()
         assert (run_dir / "evaluation" / "decision_report.md").is_file()

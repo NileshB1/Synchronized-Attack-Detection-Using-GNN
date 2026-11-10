@@ -1,6 +1,7 @@
-# Comparison runs: ablations, single-stream baselines and generator scenarios.
-# Every variant is trained and evaluated on every scenario and seed.
-seeds: [1, 2, 3]
+# Comparison runs: ablations, baselines and generator scenarios.
+# Every variant and baseline is run on every scenario and seed, on the same split.
+# The first variant is the reference for the paired t-tests in the summary.
+seeds: [1, 2, 3, 4, 5]
 
 scenarios:
   # Generator settings from default.yaml.
@@ -17,7 +18,7 @@ scenarios:
       storage_pivot_probability: 0
       missed_event_probability: 0
       stray_vm_probability: 0
-  # Campaign hops hours apart instead of minutes, so timing alone separates less.
+  # Every campaign hops hours apart instead of minutes, so timing alone separates less.
   slow_campaigns:
     generator:
       hop_delay_minutes: [120, 720]
@@ -29,18 +30,22 @@ scenarios:
   randomised:
     randomize:
       n_network: [5, 200]
-      n_coincidental_episodes: [60, 160]
-      n_coordinated_episodes: [30, 80]
+      n_coincidental_episodes: [300, 500]
+      n_coordinated_episodes: [150, 250]
 
 variants:
+  # Proposed model.
   gated: {}
+  # Fusion and stream ablation.
   concat:
     model: {fusion: concat}
   temporal_only:
     model: {use_spatial: false}
   spatial_only:
     model: {use_temporal: false}
-  one_gat_layer:
-    model: {spatial_layers: 1}
-  hidden_32:
-    model: {hidden_dim: 32, temporal_dim: 32, spatial_dim: 32, fusion_dim: 32}
+  # Base paper design on the same data: GAT on each snapshot, then a GRU.
+  continuum_style:
+    model: {architecture: chained}
+
+# Non-graph baselines.
+baselines: [rule_based, logistic_regression, random_forest]
