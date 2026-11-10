@@ -66,8 +66,30 @@ events and writes to the output directory:
 | `experiment_manifest.json` | seed, scenario, calibrated feature ranges and label counts |
 
 The generator is a port of `notebooks/random_anomaly_generator_simple.ipynb` and makes its
-random draws in the same order. With `--seed 42` it reproduces the notebook's graph and events;
-`tests/test_notebook_equivalence.py` checks this by running the notebook code itself.
+random draws in the same order. With the overlap settings below switched off and `--seed 42`, it
+reproduces the notebook's graph and events; `tests/test_notebook_equivalence.py` checks this by
+running the notebook code itself.
+
+### Overlap between the classes
+
+In the notebook's scenario a coordinated episode is always one network and a couple of hours,
+and a coincidental one is several networks spread over days, so any model scores perfectly.
+`configs/default.yaml` therefore generates 600 episodes (400 coincidental, 200 coordinated)
+and adds these harder cases:
+
+| Setting | Value | What it adds |
+| --- | --- | --- |
+| `coincidental_burst_fraction` | 0.20 | unrelated networks in one short window, like a scheduled job |
+| `coincidental_cluster_fraction` | 0.20 | one network but spread over time, like a faulty subnet |
+| `coincidental_lookalike_fraction` | 0.15 | one network and one short window, like a patch rollout |
+| `stealth_campaign_fraction` | 0.25 | campaigns with hops 2 to 12 hours apart |
+| `storage_pivot_probability` | 0.20 | a hop goes through a shared storage pool, so the chain changes network |
+| `missed_event_probability` | 0.10 | the anomaly detector misses an event |
+| `stray_vm_probability` | 0.20 | one unrelated VM is grouped into the episode |
+
+These values are assumptions chosen to represent plausible behaviour, not measurements from a
+real enterprise. The `no_overlap` scenario in `configs/experiments.yaml` keeps the original easy
+setup for comparison.
 
 ## Building the episode graphs
 
