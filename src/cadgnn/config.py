@@ -13,6 +13,7 @@ import yaml
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 FUSION_METHODS = ("gated", "concat")
+ARCHITECTURES = ("dual_stream", "chained")
 THRESHOLD_STRATEGIES = ("f1", "fpr")
 
 class ConfigError(ValueError):
@@ -127,6 +128,9 @@ class GraphConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
+    # dual_stream is the proposed model. chained is the CONTINUUM-style baseline,
+    # a GAT on each snapshot followed by a GRU; it ignores the stream and fusion settings.
+    architecture: str = "dual_stream"
     hidden_dim: int = 64
     temporal_dim: int = 64
     spatial_dim: int = 64
@@ -150,6 +154,9 @@ class ModelConfig:
         for name in ("use_temporal", "use_spatial"):
             if not isinstance(getattr(self, name), bool):
                 raise ConfigError(f"{name} must be true or false, got {getattr(self, name)!r}")
+        if self.architecture not in ARCHITECTURES:
+            choices = ", ".join(ARCHITECTURES)
+            raise ConfigError(f"architecture must be one of {choices}, got {self.architecture!r}")
         if not (self.use_temporal or self.use_spatial):
             raise ConfigError("at least one of use_temporal and use_spatial must be true")
         if self.fusion not in FUSION_METHODS:

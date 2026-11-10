@@ -15,6 +15,9 @@ from cadgnn.config import Config, GraphConfig, ModelConfig, TrainingConfig
 PARAMETERS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("graph", "min_episode_events"): (
         "graph construction", "smallest episode turned into a graph", "2, 3"),
+    ("model", "architecture"): (
+        "baseline", "dual_stream, or the CONTINUUM-style chained GAT then GRU",
+        "dual_stream, chained"),
     ("model", "hidden_dim"): (
         "both streams", "width of node and sequence representations", "32, 64, 128"),
     ("model", "temporal_dim"): (

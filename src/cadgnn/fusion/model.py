@@ -62,7 +62,12 @@ class CoordinationModel(nn.Module):
             self.train(was_training)
 
 
-def build_coordination_model(config: ModelConfig) -> CoordinationModel:
+def build_coordination_model(config: ModelConfig) -> nn.Module:
+    if config.architecture == "chained":
+        # Imported here because the baseline itself builds on this module.
+        from cadgnn.baselines.chained import ChainedGatGru
+
+        return ChainedGatGru(config)
     temporal=build_temporal_stream(config) if config.use_temporal else None
     spatial=build_spatial_stream(config) if config.use_spatial else None
     streams=DualStreamModel(config, temporal, spatial)
