@@ -75,7 +75,7 @@ running the notebook code itself.
 
 In the notebook's scenario a coordinated episode is always one network and a couple of hours,
 and a coincidental one is several networks spread over days, so any model scores perfectly.
-`configs/default.yaml` therefore generates 600 episodes (400 coincidental, 200 coordinated)
+`configs/default.yaml` therefore generates 1,500 episodes (1,000 coincidental, 500 coordinated)
 and adds these harder cases:
 
 | Setting | Value | What it adds |
@@ -179,13 +179,23 @@ python run_evaluation.py
 ```
 
 `run_training.py` reads `episode_graphs.pt`, makes a stratified train / validation / test split
-by episode (`val_fraction`, `test_fraction`), fits the feature scaler and class weight on the
-training part, trains with Adam and early stopping on validation loss, and picks the decision
-threshold on the validation part:
+by episode (`val_fraction`, `test_fraction`; 70/20/10 in `configs/default.yaml`) and saves it to
+`splits/split.json`. It fits the feature scaler and class weight on the training part, trains
+with Adam and early stopping on validation loss, and picks the decision threshold on the
+validation part:
 
 - `threshold_strategy: f1` takes the best validation F1;
 - `threshold_strategy: fpr` takes the best validation recall with false positive rate at most
-  `max_fpr`, for settings where alert fatigue matters more than missed campaigns.
+  `max_fpr`, for settings where alert fatigue matters more than missed campaigns;
+- `threshold_strategy: precision` takes the best validation recall with precision at least
+  `min_precision`, so at most 1 - `min_precision` of the alerts are false.
+
+About two in three episodes are coincidental. `balancing` sets how the training part deals with
+that: `class_weight` (the default) weighs the coordinated class up in the loss, `oversample`
+copies coordinated episodes, `undersample` drops coincidental ones, and `none` does nothing.
+Validation and test are never resampled. `fp_cost` above 1 makes a false alarm cost more than a
+missed campaign in the loss. The training history records loss and accuracy per epoch for both
+parts.
 
 Candidate thresholds are midpoints between validation scores, and among equally good ones the
 middle one is used. The checkpoint (`model/coordination_model.pt`) stores the weights, scaler,
@@ -206,9 +216,9 @@ burst, cluster and lookalike coincidental episodes, and the detection rate for f
 campaigns. The pattern is only used for this breakdown and is never a model input.
 
 Time to detect replays each coordinated test episode event by event and records when its score
-first reaches the threshold. Structural path similarity, severity metrics and probability
-calibration are not evaluated; the report lists why. Scores are uncalibrated, and all results
-come from synthetic episodes.
+first reaches the threshold. Structural path similarity and severity metrics are not evaluated;
+the report lists why. Scores here are uncalibrated; the cross-validation study below compares
+calibration. All results come from synthetic episodes.
 
 ## Baselines
 
@@ -229,7 +239,9 @@ can be put next to `run_evaluation.py`. Results go to `baselines/metrics.json`.
 
 The settings of the first three (W, the regularisation strength, tree depth and leaf size) are
 chosen by validation ROC-AUC from small fixed grids, and the threshold on validation, as for the
-GNN. Class weights are balanced to match the weighted loss.
+GNN. Class weights are balanced to match the weighted loss, unless `training.balancing` picks
+another method; they can also use `smote`, which needs feature vectors and so is not open to the
+GNN. The rule has nothing to train and is not balanced.
 
 `continuum_style` follows the base paper's encoder: a GAT over each snapshot of the episode, the
 mean of the node embeddings per snapshot, then a GRU across the snapshots. A snapshot is the
@@ -259,8 +271,8 @@ variant and baseline is run on every scenario and seed, on the same split, with 
   10 network fabrics, and `randomised` draws the network and episode counts again for every seed
   (domain randomisation).
 
-The default spec has 5 scenarios, 5 seeds, 5 variants and 3 baselines; on a CPU it takes a few
-hours, most of it for `continuum_style`.
+The default spec has 5 scenarios, 5 seeds, 5 variants and 3 baselines. With 1,500 episodes per
+scenario it takes around 10 hours on a CPU; trim `seeds` or `scenarios` for a quicker run.
 
 `results.csv` has one row per run, `summary.csv` and `summary.md` the mean and standard deviation
 over seeds, and the share of test episodes flagged per generator pattern. The variant marked as
@@ -291,14 +303,67 @@ does not show that two models are equal.
 | `model.dropout` | all | dropout rate | 0.1 | 0.1 | 0.0, 0.1, 0.3 |
 | `model.device` | runtime | cpu, cuda or auto | auto | auto | not tuned |
 | `training.val_fraction` | split | share of episodes for validation | 0.2 | 0.2 | 0.2 |
-| `training.test_fraction` | split | share of episodes held out for testing | 0.2 | 0.2 | 0.2 |
+| `training.test_fraction` | split | share of episodes held out for testing | 0.2 | 0.1 | 0.1, 0.2 |
 | `training.epochs` | training | maximum epochs | 100 | 100 | 100, 200 |
 | `training.batch_size` | training | episodes per batch | 16 | 16 | 8, 16, 32 |
 | `training.learning_rate` | training | Adam learning rate | 0.001 | 0.001 | 1e-3, 3e-4 |
 | `training.weight_decay` | training | L2 penalty in Adam | 0.0001 | 0.0001 | 0, 1e-4, 1e-3 |
 | `training.patience` | training | epochs without validation gain before stopping | 15 | 15 | 15 |
-| `training.threshold_strategy` | decision | best validation F1, or best recall under an FPR cap | f1 | f1 | f1, fpr |
+| `training.threshold_strategy` | decision | best validation F1, or best recall under an FPR cap or precision floor | f1 | f1 | f1, fpr, precision |
 | `training.max_fpr` | decision | FPR cap for the fpr strategy (alert fatigue) | 0.1 | 0.1 | 0.05, 0.1 |
+| `training.min_precision` | decision | precision floor for the precision strategy | 0.9 | 0.9 | 0.8, 0.9 |
+| `training.balancing` | imbalance | class weights, or resampling of the training part | class_weight | class_weight | class_weight, none, oversample, undersample |
+| `training.fp_cost` | false positives | loss weight of a coincidental episode | 1.0 | 1.0 | 1, 2, 4 |
+
+## Cross-validation study
+
+```bash
+python run_crossval.py
+python run_crossval.py --spec configs/crossval.yaml --out runs/crossval
+```
+
+Runs on the `episode_graphs.pt` in the output directory, so run the generator and graph builder
+first. `configs/crossval.yaml` lists the folds, the variants (the first is the proposed model),
+the baselines, the balancing methods, the tuning grid and the false positive settings. The steps:
+
+1. A stratified 70/20/10 split (the fractions and seed from the config). The test part is
+   scored once, at the end.
+2. 5 stratified folds over the 70% training part. In each fold a model trains on four folds,
+   stops early and picks its threshold on the validation part, and is scored on the fifth.
+   Resampling only touches the training folds.
+3. The proposed model's settings from `tuning` are tried on the validation part (best
+   validation ROC-AUC wins, as for the baselines) and used by every GNN variant.
+4. Balancing methods are compared on the folds; the best mean F1 of the proposed model picks
+   the one every model uses after that.
+5. Every variant and baseline runs on the same folds.
+6. False positive fixes for the proposed model are compared on the folds: a fixed 0.5 cut, a
+   threshold for a precision floor, Platt and isotonic calibration (fitted on validation), and
+   a cost-sensitive loss. The fix with the lowest mean false positive rate that loses at most
+   `max_recall_drop` recall is chosen.
+7. Every model is trained once on the full training part, tuned on validation, and scored on
+   the test part.
+
+The proposed model is compared with every other model by a paired t-test and a Wilcoxon
+signed-rank test over the folds, and McNemar's exact test on the test decisions. With 5 folds the
+smallest possible two-sided Wilcoxon p-value is 0.0625. No correction for multiple comparisons is
+applied.
+
+Outputs, all in the output directory:
+
+| Path | Contents |
+| --- | --- |
+| `splits/holdout.json`, `splits/folds.json` | episode ids of the split and of each fold |
+| `crossval/*.csv` | per-fold metrics of every step, test metrics, test predictions, significance tests, tuning, class counts |
+| `reports/imbalance.md` | class counts per part and the balancing comparison |
+| `reports/cross_validation.md` | mean ± std over folds, CV / validation / test accuracy, summed confusion matrices, tuning, a note on the training curves |
+| `reports/false_positives.md` | the false positive fixes, the test confusion matrix before and after, false positives of every model |
+| `reports/novelty.md` | ablation (change against the proposed model) and the significance tests |
+| `reports/results_table.md`, `.csv` | one row per model: balancing, CV / validation / test accuracy, test precision, recall, F1, ROC-AUC, PR-AUC, FP, FP rate, p-value and whether the proposed model beats it; best values in bold |
+| `figures/*.png` | class distribution, training and validation curves per fold, learning curves of the feature baselines, precision-recall curve with the operating points, confusion matrices before and after, false positive rate per model |
+
+The reports hold numbers only. "Beats baseline?" is computed: Y when the proposed model has the
+higher mean CV F1 and the paired t-test p-value is below `alpha`. The default spec trains about 50
+GNNs on 1,500 episodes, which takes several hours on a CPU.
 
 ## Layout
 
@@ -309,6 +374,7 @@ run_training.py       entry point for training and threshold selection
 run_evaluation.py     entry point for the held-out evaluation and decision report
 run_baselines.py      entry point for the rule-based and classic ML baselines
 run_experiments.py    entry point for the comparison experiments
+run_crossval.py       entry point for the cross-validation study
 configs/              run configurations
 notebooks/            reference notebook for the random anomaly generator (kept unchanged)
 src/cadgnn/
@@ -320,9 +386,10 @@ src/cadgnn/
   spatial/            spatial topology stream
   fusion/             fusion layers, coordination model and loss
   baselines/          CONTINUUM-style model, episode features, rule-based and classic ML baselines
-  training/           stratified split, training loop, training run
-  evaluation/         metrics, thresholds, time to detect, decision report
+  training/           stratified split, balancing, training loop, training run
+  evaluation/         metrics, thresholds, calibration, time to detect, decision report
   experiments/        experiment specs, runner, summaries, parameter table
+  crossval/           cross-validation study, significance tests, reports and figures
   config.py, cli.py   configuration and command line
 tests/                pytest suite
 ```
