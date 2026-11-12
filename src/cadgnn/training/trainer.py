@@ -14,6 +14,7 @@ from torch_geometric.loader import DataLoader
 
 from cadgnn.config import TrainingConfig
 from cadgnn.fusion import CoordinationModel, coordination_loss, positive_weight
+from cadgnn.training.balance import balance_indices
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +37,22 @@ def train_model(
 ) -> TrainingResult:
     """Fit the scaler and class weight on ``train``, then train with Adam.
 
+    ``train`` is balanced first as ``config.balancing`` says; ``val`` never is.
     The weights from the epoch with the lowest validation loss are restored at
     the end. ``val`` is only used for that choice, never for gradient updates.
+    Accuracy in the history counts a score of 0.5 or more as coordinated.
     """
     if not train or not val:
         raise ValueError("training and validation sets must not be empty")
     model.fit_scaler(train)
-    pos_weight = positive_weight(train)
+    if config.balancing == "class_weight":
+        pos_weight = positive_weight(train)
+    else:
+        positive_weight(train)  # still checks that both classes are there
+        pos_weight = torch.tensor(1.0)
+        y = [int(g.y) for g in train]
+        train = [train[i] for i in balance_indices(y, config.balancing, seed)]
+    neg_weight = config.fp_cost
     model.to(device)
 
     generator = torch.Generator().manual_seed(seed)
@@ -58,19 +68,23 @@ def train_model(
     history = []
     for epoch in range(1, config.epochs + 1):
         model.train()
-        train_losses = []
+        train_losses, correct, seen = [], 0, 0
         for batch in train_loader:
             batch = batch.to(device)
             optimiser.zero_grad()
-            loss = coordination_loss(model(batch).logit, batch.y, pos_weight)
+            logit = model(batch).logit
+            loss = coordination_loss(logit, batch.y, pos_weight, neg_weight)
             loss.backward()
             optimiser.step()
             train_losses.append(loss.item())
+            correct += int(((logit.detach() >= 0) == (batch.y.view(-1) == 1)).sum())
+            seen += batch.num_graphs
 
-        val_loss = evaluate_loss(model, val_loader, pos_weight, device)
-        history.append(
-            {"epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss}
-        )
+        val_loss, val_acc = evaluate(model, val_loader, pos_weight, device, neg_weight)
+        history.append({
+            "epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss,
+            "train_acc": correct / seen, "val_acc": val_acc,
+        })  # fmt: skip
         if val_loss < best_loss:
             best_loss, best_epoch = val_loss, epoch
             best_state = copy.deepcopy(model.state_dict())
@@ -84,14 +98,27 @@ def train_model(
 
 
 @torch.no_grad()
+def evaluate(
+    model: CoordinationModel,
+    loader: DataLoader,
+    pos_weight: torch.Tensor,
+    device,
+    neg_weight: float = 1.0,
+) -> tuple[float, float]:
+    """Mean loss and accuracy over the loader."""
+    model.eval()
+    total, correct, count = 0.0, 0, 0
+    for batch in loader:
+        batch = batch.to(device)
+        logit = model(batch).logit
+        loss = coordination_loss(logit, batch.y, pos_weight, neg_weight)
+        total += loss.item() * batch.num_graphs
+        correct += int(((logit >= 0) == (batch.y.view(-1) == 1)).sum())
+        count += batch.num_graphs
+    return total / count, correct / count
+
+
 def evaluate_loss(
     model: CoordinationModel, loader: DataLoader, pos_weight: torch.Tensor, device
 ) -> float:
-    model.eval()
-    total, count = 0.0, 0
-    for batch in loader:
-        batch = batch.to(device)
-        loss = coordination_loss(model(batch).logit, batch.y, pos_weight)
-        total += loss.item() * batch.num_graphs
-        count += batch.num_graphs
-    return total / count
+    return evaluate(model, loader, pos_weight, device)[0]

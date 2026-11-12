@@ -212,3 +212,12 @@ def test_checkpoint_round_trip(tmp_path, graphs):
 def test_config_validation(overrides, message):
     with pytest.raises(ConfigError, match=message):
         ModelConfig(**{**SMALL, **overrides})
+
+
+def test_false_alarm_cost_weighs_coincidental_episodes():
+    logit = torch.tensor([0.3, -1.0, 2.0])
+    y = torch.tensor([1, 0, 0])
+    each = F.binary_cross_entropy_with_logits(logit, y.float(), reduction="none")
+    expected = (each * torch.tensor([1.0, 3.0, 3.0])).mean()
+    assert torch.allclose(coordination_loss(logit, y, neg_weight=3.0), expected)
+    assert torch.allclose(coordination_loss(logit, y, neg_weight=1.0), each.mean())

@@ -35,16 +35,24 @@ PARAMETERS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("model", "dropout"): ("all", "dropout rate", "0.0, 0.1, 0.3"),
     ("model", "device"): ("runtime", "cpu, cuda or auto", "not tuned"),
     ("training", "val_fraction"): ("split", "share of episodes for validation", "0.2"),
-    ("training", "test_fraction"): ("split", "share of episodes held out for testing", "0.2"),
+    ("training", "test_fraction"): ("split", "share of episodes held out for testing", "0.1, 0.2"),
     ("training", "epochs"): ("training", "maximum epochs", "100, 200"),
     ("training", "batch_size"): ("training", "episodes per batch", "8, 16, 32"),
     ("training", "learning_rate"): ("training", "Adam learning rate", "1e-3, 3e-4"),
     ("training", "weight_decay"): ("training", "L2 penalty in Adam", "0, 1e-4, 1e-3"),
     ("training", "patience"): ("training", "epochs without validation gain before stopping", "15"),
     ("training", "threshold_strategy"): (
-        "decision", "best validation F1, or best recall under an FPR cap", "f1, fpr"),
+        "decision", "best validation F1, or best recall under an FPR cap or precision floor",
+        "f1, fpr, precision"),
     ("training", "max_fpr"): (
         "decision", "FPR cap for the fpr strategy (alert fatigue)", "0.05, 0.1"),
+    ("training", "min_precision"): (
+        "decision", "precision floor for the precision strategy", "0.8, 0.9"),
+    ("training", "balancing"): (
+        "imbalance", "class weights, or resampling of the training part",
+        "class_weight, none, oversample, undersample"),
+    ("training", "fp_cost"): (
+        "false positives", "loss weight of a coincidental episode", "1, 2, 4"),
 }  # fmt: skip
 
 SECTIONS = {"graph": GraphConfig, "model": ModelConfig, "training": TrainingConfig}

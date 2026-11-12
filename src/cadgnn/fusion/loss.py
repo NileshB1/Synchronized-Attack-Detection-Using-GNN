@@ -25,8 +25,14 @@ def positive_weight(train_graphs: Sequence[HeteroData]) -> Tensor:
     return torch.tensor(negatives / positives)
 
 
-def coordination_loss(logit: Tensor, y: Tensor, pos_weight: Tensor | None = None) -> Tensor:
-    """Binary cross-entropy on the coordination logit; y is 1 for coordinated."""
+def coordination_loss(
+    logit: Tensor, y: Tensor, pos_weight: Tensor | None = None, neg_weight: float = 1.0
+) -> Tensor:
+    """Binary cross-entropy on the coordination logit; y is 1 for coordinated.
+
+    ``neg_weight`` scales the loss of coincidental episodes. Above 1 it makes a
+    false alarm cost more than a missed campaign (cost-sensitive learning).
+    """
     y = y.view(-1)
     if logit.shape != y.shape:
         raise ValueError(f"logit shape {tuple(logit.shape)} does not match labels {tuple(y.shape)}")
@@ -34,4 +40,10 @@ def coordination_loss(logit: Tensor, y: Tensor, pos_weight: Tensor | None = None
         raise ValueError("labels must be 0 (coincidental) or 1 (coordinated)")
     if pos_weight is not None:
         pos_weight = pos_weight.to(logit.device)
-    return F.binary_cross_entropy_with_logits(logit, y.to(logit.dtype), pos_weight=pos_weight)
+    target = y.to(logit.dtype)
+    if neg_weight == 1.0:
+        return F.binary_cross_entropy_with_logits(logit, target, pos_weight=pos_weight)
+    loss = F.binary_cross_entropy_with_logits(
+        logit, target, pos_weight=pos_weight, reduction="none"
+    )
+    return (loss * torch.where(y == 0, neg_weight, 1.0)).mean()

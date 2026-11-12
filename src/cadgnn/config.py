@@ -14,7 +14,9 @@ import yaml
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 FUSION_METHODS = ("gated", "concat")
 ARCHITECTURES = ("dual_stream", "chained")
-THRESHOLD_STRATEGIES = ("f1", "fpr")
+THRESHOLD_STRATEGIES = ("f1", "fpr", "precision")
+# smote only works on feature vectors, so the GNN cannot use it; see cadgnn.training.balance.
+BALANCING_METHODS = ("none", "class_weight", "oversample", "undersample")
 
 class ConfigError(ValueError):
     pass
@@ -182,13 +184,22 @@ class TrainingConfig:
     # Stop when validation loss has not improved for this many epochs.
     patience: int = 15
     # f1: best F1 on validation. fpr: best recall with validation FPR <= max_fpr.
+    # precision: best recall with validation precision >= min_precision.
     threshold_strategy: str = "f1"
     max_fpr: float = 0.1
+    min_precision: float = 0.9
+    # How the training part is balanced. Validation and test are never resampled.
+    balancing: str = "class_weight"
+    # Loss weight of a coincidental episode. Above 1 a false alarm costs more than a miss.
+    fp_cost: float = 1.0
 
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "patience"):
             _check_int(getattr(self, name), name, minimum=1)
-        for name in ("val_fraction", "test_fraction", "learning_rate", "weight_decay", "max_fpr"):
+        for name in (
+            "val_fraction", "test_fraction", "learning_rate", "weight_decay",
+            "max_fpr", "min_precision", "fp_cost",
+        ):  # fmt: skip
             _check_number(getattr(self, name), name)
         if not (0 < self.val_fraction < 1 and 0 < self.test_fraction < 1):
             raise ConfigError("val_fraction and test_fraction must be between 0 and 1")
@@ -198,6 +209,13 @@ class TrainingConfig:
             raise ConfigError("learning_rate must be positive and weight_decay non-negative")
         if not 0 <= self.max_fpr <= 1:
             raise ConfigError(f"max_fpr must be in [0, 1], got {self.max_fpr}")
+        if not 0 <= self.min_precision <= 1:
+            raise ConfigError(f"min_precision must be in [0, 1], got {self.min_precision}")
+        if self.fp_cost <= 0:
+            raise ConfigError(f"fp_cost must be positive, got {self.fp_cost}")
+        if self.balancing not in BALANCING_METHODS:
+            methods = ", ".join(BALANCING_METHODS)
+            raise ConfigError(f"balancing must be one of {methods}, got {self.balancing!r}")
         if self.threshold_strategy not in THRESHOLD_STRATEGIES:
             strategies = ", ".join(THRESHOLD_STRATEGIES)
             raise ConfigError(f"threshold_strategy must be one of {strategies}")

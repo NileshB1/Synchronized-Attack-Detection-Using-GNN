@@ -96,6 +96,23 @@ def test_fpr_strategy_falls_back_to_flagging_nothing():
     assert classification_metrics([1, 0], [0.3, 0.8], threshold)["confusion_matrix"]["fp"] == 0
 
 
+def test_precision_strategy_keeps_the_floor():
+    y = [1, 1, 1, 0, 0, 0]
+    s = [0.9, 0.8, 0.4, 0.7, 0.3, 0.2]
+    strict = select_threshold(y, s, "precision", min_precision=1.0)
+    m = classification_metrics(y, s, strict)
+    assert m["precision"] == 1.0
+    assert m["recall"] == pytest.approx(2 / 3)
+    loose = classification_metrics(y, s, select_threshold(y, s, "precision", min_precision=0.75))
+    assert loose["precision"] >= 0.75
+    assert loose["recall"] == 1.0
+
+
+def test_precision_strategy_falls_back_to_flagging_nothing():
+    threshold = select_threshold([1, 0], [0.3, 0.8], "precision", min_precision=0.9)
+    assert classification_metrics([1, 0], [0.3, 0.8], threshold)["confusion_matrix"]["fp"] == 0
+
+
 def test_rates_by_pattern():
     patterns = ["fast", "fast", "stealth", "lookalike", "scattered", "scattered", "burst", "burst"]
     rates = rates_by_pattern(patterns, Y, SCORES, threshold=0.5)

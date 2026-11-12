@@ -96,11 +96,15 @@ def rates_by_pattern(patterns, y_true, scores, threshold: float) -> dict:
     return rates
 
 
-def select_threshold(y_true, scores, strategy: str = "f1", max_fpr: float = 0.1) -> float:
+def select_threshold(
+    y_true, scores, strategy: str = "f1", max_fpr: float = 0.1, min_precision: float = 0.9
+) -> float:
     """Choose a decision threshold from validation scores.
 
     ``f1`` takes the threshold with the best F1. ``fpr`` takes the threshold with
     the best recall among those whose false positive rate is at most ``max_fpr``.
+    ``precision`` takes the best recall among those with precision of at least
+    ``min_precision``, so at most 1 - min_precision of the alerts are false.
     Candidates are the midpoints between neighbouring scores. When several are
     equally good the middle one is used, so the threshold sits in the middle of
     the gap rather than right next to a validation score.
@@ -108,7 +112,7 @@ def select_threshold(y_true, scores, strategy: str = "f1", max_fpr: float = 0.1)
     y, s = _check_inputs(y_true, scores)
     if len(np.unique(y)) < 2:
         raise MetricsError("validation set needs both classes to choose a threshold")
-    if strategy not in ("f1", "fpr"):
+    if strategy not in ("f1", "fpr", "precision"):
         raise MetricsError(f"unknown threshold strategy {strategy!r}")
 
     levels = np.unique(s)
@@ -118,12 +122,15 @@ def select_threshold(y_true, scores, strategy: str = "f1", max_fpr: float = 0.1)
         m = classification_metrics(y, s, t)
         if strategy == "f1":
             values.append(m["f1"] or 0.0)
-        else:
+        elif strategy == "fpr":
             values.append(m["recall"] if m["false_positive_rate"] <= max_fpr else -1.0)
+        else:
+            precise = m["precision"] is not None and m["precision"] >= min_precision
+            values.append(m["recall"] if precise else -1.0)
     values = np.array(values)
     if values.max() < 0:
-        # Even the highest cut lets too many coincidental episodes through, so
-        # flag nothing at all.
+        # Even the highest cut lets too many false alarms through, so flag
+        # nothing at all.
         return float(np.nextafter(s.max(), np.inf))
     tied = candidates[values == values.max()]
     return float(tied[len(tied) // 2])
