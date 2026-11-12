@@ -1,7 +1,9 @@
+import json
+
 import pytest
 
 from cadgnn.graph import InfrastructureGraph, build_episode_graphs, clean_events
-from cadgnn.training import split_from_ids, stratified_split
+from cadgnn.training import save_split, split_from_ids, stratified_split
 
 
 @pytest.fixture(scope="module")
@@ -68,3 +70,13 @@ def test_saved_split_with_missing_episodes(graphs):
     ids["test"].append("coordinated_999")
     with pytest.raises(ValueError, match="rebuilt after training"):
         split_from_ids(graphs, ids)
+
+
+def test_saved_split_file(tmp_path, graphs):
+    split = stratified_split(graphs, 0.2, 0.1, seed=2)
+    path = save_split(split, graphs, tmp_path / "splits" / "split.json", seed=2)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["seed"] == 2
+    assert saved["indices"]["test"] == split.test
+    assert split_from_ids(graphs, saved["episode_ids"]) == split
+    assert sum(saved["sizes"].values()) == len(graphs)

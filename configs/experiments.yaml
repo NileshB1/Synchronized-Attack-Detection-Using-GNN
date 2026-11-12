@@ -30,8 +30,8 @@ scenarios:
   randomised:
     randomize:
       n_network: [5, 200]
-      n_coincidental_episodes: [300, 500]
-      n_coordinated_episodes: [150, 250]
+      n_coincidental_episodes: [800, 1200]
+      n_coordinated_episodes: [400, 600]
 
 variants:
   # Proposed model.

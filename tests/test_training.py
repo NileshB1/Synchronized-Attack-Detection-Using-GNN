@@ -78,6 +78,36 @@ def test_scaler_and_class_weight_come_from_training_only(graphs):
     assert result.pos_weight == pytest.approx((len(train) - n_pos) / n_pos)
 
 
+def test_history_has_accuracy(graphs):
+    model = build_coordination_model(ModelConfig(**SMALL_MODEL))
+    train, val = split_parts(graphs)
+    result = train_model(model, train, val, TrainingConfig(**SMALL_TRAINING), seed=0)
+    for row in result.history:
+        assert 0 <= row["train_acc"] <= 1
+        assert 0 <= row["val_acc"] <= 1
+
+
+@pytest.mark.parametrize("balancing", ["none", "oversample", "undersample"])
+def test_resampling_drops_the_class_weight(graphs, balancing):
+    model = build_coordination_model(ModelConfig(**SMALL_MODEL))
+    train, val = split_parts(graphs)
+    config = TrainingConfig(**SMALL_TRAINING, balancing=balancing)
+    result = train_model(model, train, val, config, seed=0)
+    assert result.pos_weight == 1.0
+    assert len(result.history) == SMALL_TRAINING["epochs"]
+
+
+def test_false_alarm_cost_changes_training(graphs):
+    train, val = split_parts(graphs)
+    losses = []
+    for cost in (1.0, 4.0):
+        seed_everything(0)
+        model = build_coordination_model(ModelConfig(**SMALL_MODEL))
+        config = TrainingConfig(**SMALL_TRAINING, fp_cost=cost)
+        losses.append(train_model(model, train, val, config, seed=0).history[0]["train_loss"])
+    assert losses[1] > losses[0]
+
+
 def test_early_stopping(graphs):
     model = build_coordination_model(ModelConfig(**SMALL_MODEL))
     train, val = split_parts(graphs)
@@ -103,6 +133,8 @@ def test_training_saves_split_threshold_and_history(output_dir):
     assert len(checkpoint["history"]) == 4
     assert checkpoint["training_config"]["threshold_strategy"] == "f1"
     assert checkpoint["val_metrics"]["n_episodes"] == len(split["val"])
+    saved = json.loads(summary["split_file"].read_text(encoding="utf-8"))
+    assert saved["episode_ids"] == split
 
 
 def test_training_is_reproducible(output_dir):

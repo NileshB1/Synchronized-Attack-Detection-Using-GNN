@@ -7,8 +7,10 @@ sides; the model never sees node identities, so that does not leak labels.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
 from torch_geometric.data import HeteroData
@@ -51,6 +53,19 @@ def stratified_split(
         parts["val"] += idx[n_test : n_test + n_val].tolist()
         parts["train"] += idx[n_test + n_val :].tolist()
     return Split(**{name: sorted(part) for name, part in parts.items()})
+
+
+def save_split(split: Split, graphs: Sequence[HeteroData], path: Path, **extra) -> Path:
+    """Write the split as positions and episode ids, so it can be rebuilt later."""
+    payload = {
+        **extra,
+        "sizes": {name: len(getattr(split, name)) for name in ("train", "val", "test")},
+        "indices": asdict(split),
+        "episode_ids": split.episode_ids(graphs),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
 
 def split_from_ids(graphs: Sequence[HeteroData], ids: dict[str, list[str]]) -> Split:

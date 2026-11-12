@@ -110,7 +110,7 @@ def test_generator_overlap_settings_are_off_by_default():
 
 def test_repo_default_config_turns_on_class_overlap():
     g = load_config(REPO_ROOT / "configs" / "default.yaml").generator
-    assert (g.n_coincidental_episodes, g.n_coordinated_episodes) == (400, 200)
+    assert (g.n_coincidental_episodes, g.n_coordinated_episodes) == (1000, 500)
     assert g.coincidental_lookalike_fraction > 0
     assert g.stealth_campaign_fraction > 0
     assert (g.n_vms, g.n_storage, g.n_network) == (12000, 300, 200)
@@ -188,7 +188,7 @@ def test_model_section(tmp_path):
 
 def test_training_section(tmp_path):
     training = load_config(REPO_ROOT / "configs" / "default.yaml").training
-    assert (training.val_fraction, training.test_fraction) == (0.2, 0.2)
+    assert (training.val_fraction, training.test_fraction) == (0.2, 0.1)
     assert training.threshold_strategy == "f1"
     config = load_config(write(tmp_path, "training:\n  epochs: 5\n  threshold_strategy: fpr\n"))
     assert (config.training.epochs, config.training.threshold_strategy) == (5, "fpr")
@@ -217,3 +217,23 @@ def test_display_path_hides_the_local_folder(tmp_path, monkeypatch):
     assert display_path(outside) == str(outside)
     config = parse_config({}, base_dir=tmp_path)
     assert str(tmp_path) not in describe(config)
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("training:\n  balancing: smote\n", "balancing must be one of"),
+        ("training:\n  fp_cost: 0\n", "fp_cost must be positive"),
+        ("training:\n  min_precision: 1.5\n", "min_precision"),
+    ],
+)
+def test_imbalance_and_false_alarm_settings(tmp_path, text, message):
+    with pytest.raises(ConfigError, match=message):
+        load_config(write(tmp_path, text))
+
+
+def test_precision_threshold_strategy_is_accepted(tmp_path):
+    text = "training:\n  threshold_strategy: precision\n  min_precision: 0.8\n"
+    training = load_config(write(tmp_path, text)).training
+    assert (training.threshold_strategy, training.min_precision) == ("precision", 0.8)
+    assert (training.balancing, training.fp_cost) == ("class_weight", 1.0)

@@ -13,28 +13,28 @@ generator:
   n_network: 200
   observation_hours: 72
   benign_backups_per_vm: 6
-  n_coincidental_episodes: 400
+  n_coincidental_episodes: 1000
   coincidental_vms: [3, 6]
-  n_coordinated_episodes: 200
+  n_coordinated_episodes: 500
   coordinated_chain_length: [4, 8]
   hop_delay_minutes: [5, 45]
   campaign_start_margin_hours: 2
   # Overlap between the classes. These shares are assumptions, not measured values.
-  coincidental_burst_fraction: 0.20      # short window, unrelated networks (scheduled job)
-  coincidental_cluster_fraction: 0.20    # one network, spread over time (faulty subnet)
+  coincidental_burst_fraction: 0.20   # short window, unrelated networks (scheduled job)
+  coincidental_cluster_fraction: 0.20  # one network, spread over time (faulty subnet)
   coincidental_lookalike_fraction: 0.15  # one network, short window (patch rollout)
   coincidental_window_hours: [0.5, 6]
-  stealth_campaign_fraction: 0.25        # low and slow campaigns
+  stealth_campaign_fraction: 0.25   # low and slow campaigns
   stealth_hop_delay_minutes: [120, 720]
-  storage_pivot_probability: 0.20        # hop through a shared storage pool
-  missed_event_probability: 0.10         # detector misses an event
-  stray_vm_probability: 0.20             # unrelated VM grouped into the episode
+  storage_pivot_probability: 0.20   # hop through a shared storage pool
+  missed_event_probability: 0.10   # detector misses an event
+  stray_vm_probability: 0.20  # unrelated VM grouped into the episode
 
 # Episode graph construction.
 graph:
   min_episode_events: 2
 
-# Dual-stream model. Each stream returns one embedding per episode graph.
+# Dual-stream model. Each stream returns one embedding per episode graph
 model:
   hidden_dim: 64
   temporal_dim: 64
@@ -44,15 +44,16 @@ model:
   spatial_heads: 2
   use_temporal: true
   use_spatial: true
-  fusion: gated         # gated or concat
+  fusion: gated   
   fusion_dim: 64
   dropout: 0.1
   device: auto
 
-# Training and evaluation. The split is stratified by label and made per episode.
+# Training and evaluation. The split is stratified by label and made per episode:
+# 70% train, 20% validation, 10% test.
 training:
   val_fraction: 0.2
-  test_fraction: 0.2
+  test_fraction: 0.1
   epochs: 100
   batch_size: 16
   learning_rate: 0.001
