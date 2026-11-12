@@ -12,13 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cadgnn.cli import main  # noqa: E402
+from cadgnn.cli import main
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     if "--config" not in args and "-c" not in args:
         args = ["--config", str(ROOT / "configs" / "default.yaml"), *args]
-    # --spec and --out belong to the experiment command, so they go after it.
+    
     command = ["experiment", "--spec", str(ROOT / "configs" / "experiments.yaml")]
     for flag in ("--spec", "--out"):
         if flag in args:

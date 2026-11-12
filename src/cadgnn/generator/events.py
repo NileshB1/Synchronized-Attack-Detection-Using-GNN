@@ -1,11 +1,4 @@
 """Benign, coincidental and coordinated backup events.
-
-Port of sections 5 and 6 of notebooks/random_anomaly_generator_simple.ipynb. All
-randomness comes from one numpy Generator and draws happen in the notebook's
-order, so the same seed and scenario reproduce the notebook's graph and events.
-
-The notebook's two classes never overlap. The overlap settings in GeneratorConfig
-add harder cases on top of it, and make no random draws while they are off.
 """
 
 from __future__ import annotations
@@ -20,11 +13,7 @@ import pandas as pd
 from cadgnn.config import GeneratorConfig
 from cadgnn.data.calibration import ParamProfile, weighted_score
 from cadgnn.generator.infrastructure import (
-    build_infrastructure,
-    find_attack_chain,
-    vm_nodes,
-    vms_on_one_network,
-)
+    build_infrastructure,  find_attack_chain, vm_nodes,  vms_on_one_network)
 
 log = logging.getLogger(__name__)
 
@@ -32,9 +21,7 @@ LABELS = ("none", "coincidental", "coordinated")
 EVENT_COLUMNS = [
     "vm", "timestamp_hours",
     "change_rate", "file_entropy", "backup_size_gb",
-    "file_count", "anomaly_score",
-    "state", "episode_id",
-    "label",
+    "file_count", "anomaly_score", "state", "episode_id", "label"
 ]
 
 
@@ -57,14 +44,9 @@ class SyntheticDataset:
 
 
 def make_event(
-    vm: str,
-    timestamp_hours: float,
-    state: str,
+    vm: str,  timestamp_hours: float,  state: str,
     episode_id: str | None,
-    label: str,
-    profile: ParamProfile,
-    rng: np.random.Generator,
-) -> dict:
+    label: str,  profile: ParamProfile,  rng: np.random.Generator):
     values = {name: float(rng.uniform(*feature.bounds(state))) for name, feature in profile.items()}
     # The score uses unrounded values; only the stored values are rounded.
     score = weighted_score(profile, values)
@@ -97,11 +79,8 @@ def coincidental_pattern(config: GeneratorConfig, rng: np.random.Generator) -> s
 
 def observed_events(
     episode: list[dict],
-    vms: np.ndarray,
-    profile: ParamProfile,
-    config: GeneratorConfig,
-    rng: np.random.Generator,
-) -> list[dict]:
+    vms: np.ndarray,  profile: ParamProfile,
+    config: GeneratorConfig, rng: np.random.Generator):
     """What the anomaly detector reports for an episode: some events lost, maybe one extra."""
     if config.missed_event_probability:
         keep = rng.random(len(episode)) >= config.missed_event_probability
@@ -124,12 +103,9 @@ def observed_events(
 
 
 def generate_events(
-    graph: nx.Graph,
-    profile: ParamProfile,
+    graph: nx.Graph, profile: ParamProfile,
     config: GeneratorConfig,
-    rng: np.random.Generator,
-    patterns: dict[str, str] | None = None,
-) -> pd.DataFrame:
+    rng: np.random.Generator,  patterns: dict[str, str] | None = None):
     """Benign backups plus both kinds of episode, sorted by time.
 
     If patterns is given it is filled with the pattern of every episode (see

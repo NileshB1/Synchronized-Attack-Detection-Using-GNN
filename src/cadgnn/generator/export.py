@@ -24,8 +24,7 @@ def build_manifest(dataset: SyntheticDataset, calibration: Calibration) -> dict:
     graph, events, config = dataset.graph, dataset.events, dataset.config
     profile = calibration.profile
     return {
-        "random_seed": dataset.seed,
-        "num_vms": config.n_vms,
+        "random_seed": dataset.seed, "num_vms": config.n_vms,
         "num_storage": config.n_storage,  "num_network": config.n_network,
         "total_graph_nodes": graph.number_of_nodes(), "total_graph_edges": graph.number_of_edges(),
         "num_features": len(profile),
