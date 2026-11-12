@@ -44,11 +44,13 @@ def evaluate_baseline(
     test = [graphs[i] for i in split.test]
     val_scores = fitted.score(val)
     threshold = select_threshold(
-        labels(val), val_scores, training.threshold_strategy, training.max_fpr
-    )
+        labels(val), val_scores, training.threshold_strategy, training.max_fpr,
+        training.min_precision,
+    )  # fmt: skip
     test_y, test_scores = labels(test), fitted.score(test)
     return {
         "baseline": fitted.name,
+        "balancing": "n/a" if fitted.name == "rule_based" else training.balancing,
         "settings": fitted.settings,
         "threshold": threshold,
         "val_metrics": classification_metrics(labels(val), val_scores, threshold),
@@ -70,7 +72,7 @@ def baseline_results(
     val = [graphs[i] for i in split.val]
     results = {}
     for name in names:
-        fitted = fit_baseline(name, train, val, config.seed)
+        fitted = fit_baseline(name, train, val, config.seed, tc.balancing)
         results[name] = evaluate_baseline(
             fitted, graphs, split, tc, config.graph.min_episode_events
         )

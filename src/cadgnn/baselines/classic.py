@@ -8,8 +8,10 @@ on the validation part as for the GNN, and the test part is scored once.
   linked when their VMs share a network or a storage pool and they are at most
   W hours apart; the score is the share of linked steps. W is the setting.
 - logistic_regression and random_forest: scikit-learn models on the episode
-  features in cadgnn.baselines.features, with balanced class weights to match
-  the weighted loss of the GNN.
+  features in cadgnn.baselines.features. By default they use balanced class
+  weights to match the weighted loss of the GNN; the other balancing methods
+  in cadgnn.training.balance resample the training part only. The rule has
+  nothing to train, so balancing does not apply to it.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from sklearn.preprocessing import StandardScaler
 from torch_geometric.data import HeteroData
 
 from cadgnn.baselines.features import feature_matrix, labels, steps
+from cadgnn.training.balance import FEATURE_BALANCING, balance_indices, smote
 
 BASELINES = ("rule_based", "logistic_regression", "random_forest")
 RULE_WINDOWS_HOURS = (0.25, 0.5, 1, 2, 4, 8, 12, 24, 48)
@@ -39,6 +42,34 @@ class FittedBaseline:
     name: str
     score: Callable[[Sequence[HeteroData]], np.ndarray]
     settings: dict = field(default_factory=dict)
+    # The chosen model options, to fit the same model again on other data.
+    options: dict = field(default_factory=dict)
+
+
+def make_estimator(name: str, options: dict, seed: int, balancing: str = "class_weight"):
+    weight = "balanced" if balancing == "class_weight" else None
+    if name == "logistic_regression":
+        return make_pipeline(
+            StandardScaler(), LogisticRegression(class_weight=weight, max_iter=5000, **options)
+        )
+    if name == "random_forest":
+        return RandomForestClassifier(
+            n_estimators=300, class_weight=weight, random_state=seed, n_jobs=-1, **options
+        )
+    raise ValueError(f"{name} is not a scikit-learn baseline")
+
+
+def fit_estimator(name: str, options: dict, x, y, seed: int, balancing: str = "class_weight"):
+    """Balance the training rows as asked, then fit."""
+    if balancing not in FEATURE_BALANCING:
+        choices = ", ".join(FEATURE_BALANCING)
+        raise ValueError(f"unknown balancing {balancing!r}, choose from {choices}")
+    if balancing == "smote":
+        x, y = smote(x, y, seed)
+    else:
+        keep = balance_indices(y, balancing, seed)
+        x, y = x[keep], y[keep]
+    return make_estimator(name, options, seed, balancing).fit(x, y)
 
 
 def rule_scores(graphs: Sequence[HeteroData], window_hours: float) -> np.ndarray:
@@ -65,7 +96,11 @@ def _pick(candidates, val_y: np.ndarray):
 
 
 def fit_baseline(
-    name: str, train: Sequence[HeteroData], val: Sequence[HeteroData], seed: int
+    name: str,
+    train: Sequence[HeteroData],
+    val: Sequence[HeteroData],
+    seed: int,
+    balancing: str = "class_weight",
 ) -> FittedBaseline:
     if name not in BASELINES:
         raise ValueError(f"unknown baseline {name!r}, choose from {', '.join(BASELINES)}")
@@ -83,27 +118,16 @@ def fit_baseline(
     x_val = feature_matrix(val)
     if name == "logistic_regression":
         options = [{"C": c} for c in LOGISTIC_C]
-
-        def make(options):
-            return make_pipeline(
-                StandardScaler(),
-                LogisticRegression(class_weight="balanced", max_iter=5000, **options),
-            )
     else:
         options = [
             dict(zip(FOREST_GRID, values, strict=True))
             for values in product(*FOREST_GRID.values())
         ]
 
-        def make(options):
-            return RandomForestClassifier(
-                n_estimators=300, class_weight="balanced", random_state=seed, n_jobs=-1, **options
-            )
-
     fitted = {}
     candidates = []
     for i, opts in enumerate(options):
-        model = make(opts).fit(x_train, y_train)
+        model = fit_estimator(name, opts, x_train, y_train, seed, balancing)
         fitted[i] = model
         candidates.append(({"index": i, **opts}, model.predict_proba(x_val)[:, 1]))
     settings, auc = _pick(candidates, val_y)
@@ -112,4 +136,4 @@ def fit_baseline(
     def score(graphs: Sequence[HeteroData]) -> np.ndarray:
         return model.predict_proba(feature_matrix(graphs))[:, 1]
 
-    return FittedBaseline(name, score, {**settings, "val_roc_auc": auc})
+    return FittedBaseline(name, score, {**settings, "val_roc_auc": auc}, dict(settings))

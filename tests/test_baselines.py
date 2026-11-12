@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 import torch
 
-from cadgnn.baselines import FEATURE_NAMES, episode_features, fit_baseline, rule_scores
+from cadgnn.baselines import (
+    FEATURE_NAMES,
+    episode_features,
+    fit_baseline,
+    fit_estimator,
+    rule_scores,
+)
 from cadgnn.baselines.chained import ChainedGatGru, snapshots
 from cadgnn.baselines.features import steps, vm_resources
 from cadgnn.baselines.run import baseline_results, run_baselines
@@ -77,6 +83,24 @@ def test_fitted_baselines_score_every_episode(graphs, name):
     json.dumps(fitted.settings)
 
 
+@pytest.mark.parametrize("balancing", ["none", "oversample", "undersample", "smote"])
+def test_feature_baselines_with_other_balancing(graphs, balancing):
+    train, val = parts(graphs)
+    fitted = fit_baseline("logistic_regression", train, val, seed=0, balancing=balancing)
+    assert fitted.score(graphs).shape == (len(graphs),)
+    assert set(fitted.options) == {"C"}
+
+
+def test_fit_estimator_balances_only_what_it_is_given():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(30, 3))
+    y = np.array([0] * 20 + [1] * 10)
+    model = fit_estimator("random_forest", {"max_depth": 2}, x, y, seed=0, balancing="oversample")
+    assert model.class_weight is None
+    with pytest.raises(ValueError, match="unknown balancing"):
+        fit_estimator("random_forest", {}, x, y, seed=0, balancing="tomek")
+
+
 def test_unknown_baseline(graphs):
     with pytest.raises(ValueError, match="unknown baseline"):
         fit_baseline("svm", *parts(graphs), seed=0)
@@ -91,6 +115,8 @@ def test_baselines_use_the_training_split(tmp_path, graphs):
         assert outcome["split_sizes"]["train"] == len(split.train)
         assert set(outcome["by_pattern"]) <= {"scattered", "fast"}
         assert outcome["time_to_detect"]["n_campaigns"] == outcome["test_metrics"]["n_coordinated"]
+    assert found["rule_based"]["balancing"] == "n/a"
+    assert found["random_forest"]["balancing"] == "class_weight"
 
 
 def test_run_baselines_writes_metrics(tmp_path, graphs):
