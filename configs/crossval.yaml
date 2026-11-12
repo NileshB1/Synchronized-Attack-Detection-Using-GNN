@@ -1,0 +1,34 @@
+# Cross-validation study on the episode graphs in output_dir (run the generator
+# and graph builder first). The split fractions and the seed come from default.yaml.
+folds: 5
+
+# The first variant is the proposed model. The others each change one part of it
+# (ablation), and continuum_style is the base paper's design on the same data.
+variants:
+  gated: {}
+  concat:
+    model: {fusion: concat}
+  temporal_only:
+    model: {use_spatial: false}
+  spatial_only:
+    model: {use_temporal: false}
+  continuum_style:
+    model: {architecture: chained}
+
+baselines: [rule_based, logistic_regression, random_forest]
+
+# Compared on the folds. The GNN skips smote, which needs feature vectors.
+balancing: [class_weight, none, oversample, undersample, smote]
+
+# Settings of the proposed model tried on the validation part. The winner is
+# used by every GNN variant, as the baselines also pick their settings there.
+tuning:
+  training:
+    learning_rate: [0.001, 0.003]
+
+false_positives:
+  fp_cost: 2.0           # a false alarm costs twice a miss in the loss
+  min_precision: 0.9     # precision floor for the precision threshold
+  max_recall_drop: 0.05  # a fix may lose at most this much mean recall
+
+alpha: 0.05

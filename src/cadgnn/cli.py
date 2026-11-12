@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     experiment.add_argument("--spec", required=True, help="experiment spec YAML file")
     experiment.add_argument("--out", help="where to write runs (default: <output_dir>/experiments)")
+    crossval = commands.add_parser(
+        "crossval", help="k-fold study: balancing, false positives, ablation and baselines"
+    )
+    crossval.add_argument("--spec", required=True, help="cross-validation spec YAML file")
+    crossval.add_argument("--out", help="where to write results (default: <output_dir>)")
     commands.add_parser("params", help="print the table of tunable settings")
     return parser
 
@@ -136,6 +141,7 @@ def cmd_train(config: Config) -> int:
         f"FPR {val['false_positive_rate']:.3f})"
     )
     print(f"  wrote {display_path(summary['checkpoint'])}")
+    print(f"  wrote {display_path(summary['split_file'])}")
     return 0
 
 
@@ -226,6 +232,43 @@ def cmd_experiment(config: Config, spec_path: str, out: str | None) -> int:
     return 0
 
 
+def cmd_crossval(config: Config, spec_path: str, out: str | None) -> int:
+    warnings.filterwarnings("ignore", message="`torch.jit.script` is deprecated")
+    from cadgnn.crossval import load_crossval_spec, results_frame, run_crossval, write_reports
+    from cadgnn.crossval.figures import write_figures
+
+    try:
+        spec = load_crossval_spec(spec_path, config)
+    except ConfigError as exc:
+        print(f"cadgnn: cross-validation spec error: {exc}", file=sys.stderr)
+        return 2
+    out_dir = Path(out) if out else config.paths.output_dir
+    try:
+        result = run_crossval(config, spec, out_dir)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 1
+    paths = {**result.paths, **write_reports(result, spec, out_dir),
+             **write_figures(result, out_dir)}  # fmt: skip
+
+    def fmt(value):
+        return "n/a" if value != value or value is None else f"{value:.3f}"
+
+    print(f"balancing chosen on the folds: {result.balancing}")
+    print(f"false positive fix chosen on the folds: {result.fp_strategy}")
+    if result.tuned:
+        print(f"tuned on validation: {result.tuned}")
+    for _, row in results_frame(result).iterrows():
+        print(
+            f"{row['model']:<32} CV acc {fmt(row['cv_accuracy_mean'])}  "
+            f"test F1 {fmt(row['f1'])}  FP {int(row['fp'])}  FPR {fmt(row['fp_rate'])}  "
+            f"p {fmt(row['p_value_vs_ours'])}"
+        )
+    for path in paths.values():
+        print(f"  wrote {display_path(path)}")
+    return 0
+
+
 def cmd_params(config: Config) -> int:
     warnings.filterwarnings("ignore", message="`torch.jit.script` is deprecated")
     from cadgnn.experiments.parameters import render_parameter_table
@@ -264,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_baselines(config)
         if args.command == "experiment":
             return cmd_experiment(config, args.spec, args.out)
+        if args.command == "crossval":
+            return cmd_crossval(config, args.spec, args.out)
         if args.command == "params":
             return cmd_params(config)
     except (DatasetError, CalibrationError) as exc:
