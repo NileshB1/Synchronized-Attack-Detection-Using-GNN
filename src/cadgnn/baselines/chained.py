@@ -1,19 +1,4 @@
-"""CONTINUUM-style baseline: a GAT on each snapshot, then a GRU across snapshots.
-
-CONTINUUM (Bahar et al., 2025) builds node embeddings as RNN([GNN(G_t)] for t = 1..T)
-over time snapshots of a provenance graph and takes the mean of the node
-embeddings as the graph embedding. Here the snapshots of an episode are the
-episode graph after each of its events, so snapshot t holds the first t
-flagged VMs and their resources.
-
-Changes from the paper, so it can be compared on the same task and split:
-- trained with labels and the same weighted loss, threshold and metrics as the
-  dual-stream model, instead of an autoencoder with k-nearest-neighbour
-  distances to benign graphs;
-- no edge features in the attention, since the episode graphs have none;
-- snapshots follow events, not fixed time intervals, so the hours since the
-  first event are passed to the GRU with each snapshot;
-- no federated learning.
+"""CONTINUUM-style baseline: a GAT on each snapshot, then a GRU across snapshots
 """
 
 from __future__ import annotations

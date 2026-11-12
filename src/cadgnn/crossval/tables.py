@@ -227,14 +227,11 @@ def render_novelty(result: CrossvalResult, spec: CrossvalSpec) -> str:
     table = pd.DataFrame({
         "Model": sig["model"],
         f"{result.reference} CV F1": sig["ours_f1"].map(num),
-        "Their CV F1": sig["theirs_f1"].map(num),
-        "t-test p (F1)": sig["t_test_p_f1"].map(p_value),
-        "Wilcoxon p (F1)": sig["wilcoxon_p_f1"].map(p_value),
-        "t-test p (ROC-AUC)": sig["t_test_p_roc_auc"].map(p_value),
+        "Their CV F1": sig["theirs_f1"].map(num),  "t-test p (F1)": sig["t_test_p_f1"].map(p_value),
+        "Wilcoxon p (F1)": sig["wilcoxon_p_f1"].map(p_value), "t-test p (ROC-AUC)": sig["t_test_p_roc_auc"].map(p_value),
         "McNemar: only ours right": sig["mcnemar_only_ours"],
-        "McNemar: only theirs right": sig["mcnemar_only_theirs"],
-        "McNemar p (test)": sig["mcnemar_p"].map(p_value),
-    })  # fmt: skip
+        "McNemar: only theirs right": sig["mcnemar_only_theirs"],  "McNemar p (test)": sig["mcnemar_p"].map(p_value)
+    })
     return "\n".join([
         "# Ablation and significance", "",
         f"Ablation: each variant changes one part of `{result.reference}`. Change columns are "
@@ -284,7 +281,7 @@ def results_frame(result: CrossvalResult) -> pd.DataFrame:
             "p_value_vs_ours": np.nan if is_ours else sig.loc[model, "t_test_p_f1"],
             "ours_beats_it": None if is_ours or model == fp_name
             else bool(sig.loc[model, "ours_better"]),
-        })  # fmt: skip
+        })
     return pd.DataFrame(rows)
 
 
@@ -348,11 +345,9 @@ def write_reports(result: CrossvalResult, spec: CrossvalSpec, out_dir: Path) -> 
     reports.mkdir(parents=True, exist_ok=True)
     frame = results_frame(result)
     texts = {
-        "imbalance": render_imbalance(result),
-        "cross_validation": render_cv(result, spec),
+        "imbalance": render_imbalance(result), "cross_validation": render_cv(result, spec),
         "false_positives": render_false_positives(result, spec),
-        "novelty": render_novelty(result, spec),
-        "results_table": render_results(frame, result, spec),
+        "novelty": render_novelty(result, spec),  "results_table": render_results(frame, result, spec)
     }
     paths = {}
     for name, text in texts.items():

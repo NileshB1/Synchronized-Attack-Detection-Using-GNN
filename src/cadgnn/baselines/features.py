@@ -1,9 +1,4 @@
-"""Fixed-length features per episode for the non-graph baselines.
-
-They summarise what an analyst could read off an episode without a GNN: how
-many networks and storage pools the VMs share, how spread out the events are in
-time, and how intense the telemetry is. Like the GNN, they never use labels,
-episode ids, patterns or node identities.
+"""Fixed-length features per episode for the non-graph baselines
 """
 
 from __future__ import annotations

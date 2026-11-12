@@ -1,7 +1,4 @@
-"""Fit and score the non-graph baselines on the same split as the GNN.
-
-The split comes from the same seed and fractions as run_training, so the
-baselines are tested on exactly the episodes the GNN is tested on.
+"""Fit and score the non-graph baselines on the same split as the GNN
 """
 
 from __future__ import annotations
@@ -17,10 +14,8 @@ from cadgnn.baselines.classic import BASELINES, FittedBaseline, fit_baseline
 from cadgnn.baselines.features import labels
 from cadgnn.config import Config, TrainingConfig, display_path
 from cadgnn.evaluation import (
-    classification_metrics,
-    detection_times,
-    rates_by_pattern,
-    select_threshold,
+    classification_metrics, detection_times,
+    rates_by_pattern, select_threshold
 )
 from cadgnn.graph import load_episode_graphs
 from cadgnn.graph.episodes import EPISODE_GRAPHS_FILE
@@ -36,9 +31,8 @@ def patterns_of(graphs: Sequence[HeteroData]) -> list[str]:
 def evaluate_baseline(
     fitted: FittedBaseline,
     graphs: Sequence[HeteroData],
-    split: Split,
-    training: TrainingConfig,
-    min_events: int = 2,
+    split: Split,   training: TrainingConfig,
+    min_events: int = 2
 ) -> dict:
     val = [graphs[i] for i in split.val]
     test = [graphs[i] for i in split.test]
@@ -51,8 +45,7 @@ def evaluate_baseline(
     return {
         "baseline": fitted.name,
         "balancing": "n/a" if fitted.name == "rule_based" else training.balancing,
-        "settings": fitted.settings,
-        "threshold": threshold,
+        "settings": fitted.settings,  "threshold": threshold,
         "val_metrics": classification_metrics(labels(val), val_scores, threshold),
         "test_metrics": classification_metrics(test_y, test_scores, threshold),
         "time_to_detect": detection_times(fitted.score, test, threshold, min_events),

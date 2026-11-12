@@ -1,17 +1,4 @@
-"""Rule-based correlation and classic machine learning baselines.
-
-All of them see the same train / validation / test split as the GNN. Their few
-settings are chosen by ROC-AUC on the validation part, the threshold is chosen
-on the validation part as for the GNN, and the test part is scored once.
-
-- rule_based: a SIEM-style correlation rule. Two consecutive flagged events are
-  linked when their VMs share a network or a storage pool and they are at most
-  W hours apart; the score is the share of linked steps. W is the setting.
-- logistic_regression and random_forest: scikit-learn models on the episode
-  features in cadgnn.baselines.features. By default they use balanced class
-  weights to match the weighted loss of the GNN; the other balancing methods
-  in cadgnn.training.balance resample the training part only. The rule has
-  nothing to train, so balancing does not apply to it.
+"""Rule-based correlation and classic machine learning baselines
 """
 
 from __future__ import annotations

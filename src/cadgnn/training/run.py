@@ -1,7 +1,4 @@
-"""Split, train, choose the threshold on validation and save a checkpoint.
-
-The test part of the split is not touched here; its episode ids are stored in
-the checkpoint so evaluation scores exactly the held-out episodes.
+"""Split, train, choose the threshold on validation and save a checkpoint
 """
 
 from __future__ import annotations
@@ -28,10 +25,7 @@ SPLIT_FILE = Path("splits") / "split.json"
 def run_training(
     config: Config, graphs_file: Path | None = None, run_dir: Path | None = None
 ) -> dict:
-    """Train on the episode graphs; the checkpoint goes to ``run_dir/model``.
-
-    Both default to the configured output directory. Experiments pass their own
-    ``run_dir`` so several model variants can share one set of graphs.
+    """Train on the episode graphs; the checkpoint goes to ``run_dir/model``
     """
     output_dir = config.paths.output_dir
     run_dir = run_dir or output_dir
@@ -58,24 +52,16 @@ def run_training(
     path = run_dir / CHECKPOINT_FILE
     save_checkpoint(
         model.cpu(),
-        path,
-        seed=config.seed,
-        training_config=asdict(tc),
-        split=split.episode_ids(graphs),
-        threshold=threshold,
-        best_epoch=result.best_epoch,
-        best_val_loss=result.best_val_loss,
-        pos_weight=result.pos_weight,
-        history=result.history,
-        val_metrics=val_metrics,
+        path,  seed=config.seed,
+        training_config=asdict(tc), split=split.episode_ids(graphs),
+        threshold=threshold,  best_epoch=result.best_epoch,
+        best_val_loss=result.best_val_loss, pos_weight=result.pos_weight,
+        history=result.history, val_metrics=val_metrics
     )
     return {
-        "checkpoint": path,
-        "split_file": run_dir / SPLIT_FILE,
-        "threshold": threshold,
-        "best_epoch": result.best_epoch,
-        "best_val_loss": result.best_val_loss,
-        "epochs_run": len(result.history),
+        "checkpoint": path, "split_file": run_dir / SPLIT_FILE,
+        "threshold": threshold,  "best_epoch": result.best_epoch,
+        "best_val_loss": result.best_val_loss,   "epochs_run": len(result.history),
         "val_metrics": val_metrics,
-        "split_sizes": {"train": len(train), "val": len(val), "test": len(split.test)},
+        "split_sizes": {"train": len(train), "val": len(val), "test": len(split.test)}
     }

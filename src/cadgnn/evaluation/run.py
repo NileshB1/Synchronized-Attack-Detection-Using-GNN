@@ -1,4 +1,4 @@
-"""Score the held-out test episodes with a saved checkpoint and write the report."""
+"""Score the held-out test episodes with a saved checkpoint and write the report"""
 
 from __future__ import annotations
 
@@ -75,21 +75,17 @@ def run_evaluation(
         }
 
     results = {
-        "seed": checkpoint["seed"],
-        "checkpoint": display_path(checkpoint_path),
-        "episode_graphs": display_path(graphs_file),
-        "model_config": checkpoint["model_config"],
+        "seed": checkpoint["seed"],  "checkpoint": display_path(checkpoint_path),
+        "episode_graphs": display_path(graphs_file), "model_config": checkpoint["model_config"],
         "training_config": checkpoint["training_config"],
         "threshold_strategy": checkpoint["training_config"]["threshold_strategy"],
         "best_epoch": checkpoint["best_epoch"],
         "split_sizes": {name: len(getattr(split, name)) for name in ("train", "val", "test")},
         "val_metrics": checkpoint["val_metrics"],
-        "test_metrics": test_metrics,
-        "time_to_detect": detection,
-        "by_pattern": by_pattern,
-        "gate_summary": gate_summary,
+        "test_metrics": test_metrics,  "time_to_detect": detection,
+        "by_pattern": by_pattern,  "gate_summary": gate_summary,
         "mean_test_score": float(np.mean(pred.scores)),
-        "not_evaluated": NOT_EVALUATED,
+        "not_evaluated": NOT_EVALUATED
     }
     paths = write_evaluation(run_dir / EVALUATION_DIR, results, decisions)
     return {"results": results, "paths": paths}
