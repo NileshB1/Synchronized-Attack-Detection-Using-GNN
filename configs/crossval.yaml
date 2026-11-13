@@ -12,6 +12,10 @@ variants:
     model: {use_spatial: false}
   spatial_only:
     model: {use_temporal: false}
+  no_step_links:
+    model: {step_links: false}
+  no_summary:
+    model: {use_summary: false}
   continuum_style:
     model: {architecture: chained}
 

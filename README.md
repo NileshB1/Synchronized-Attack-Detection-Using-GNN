@@ -142,6 +142,11 @@ with the mean state. There are no severity labels in the data, so the stream has
 target of its own and learns through the episode label. Missing, negative or decreasing event
 times are rejected.
 
+With `step_links: true` (the default) each step also says whether its VM shares a network or a
+storage pool with the previous event's VM. A campaign moves along those links and most
+coincidental episodes do not, but neither stream sees it alone: the GRU knows the order and not
+the topology, the GAT knows the topology and not the order.
+
 ### Spatial topology stream
 
 `cadgnn.spatial.SpatialTopologyStream` runs graph attention (`GATConv` per edge type inside
@@ -166,6 +171,12 @@ coincidental (0).
   The mean gate value is returned as the temporal share of the decision.
 - `fusion: concat` concatenates the embeddings and projects them; it is the fusion baseline.
 - `use_temporal: false` or `use_spatial: false` runs a single-stream baseline for ablation.
+- `use_summary: true` (default) joins the fused vector with a few whole-episode numbers before
+  the classifier (`cadgnn.fusion.summary`): counts of VMs, networks, storage pools and connected
+  pieces, the share of VMs on the busiest network and pool, the time span, the mean, smallest
+  and largest gap and their variation, and the share of linked steps. They are the global
+  attribute of the graph, computed from the same episode graph, and are hard for message passing
+  to count. They match the structure and timing features of the feature baselines.
 
 `sigmoid(logit)` (`CoordinationModel.score`) is an uncalibrated coordination score, not a
 probability; the decision threshold is chosen during evaluation. `coordination_loss` is binary
