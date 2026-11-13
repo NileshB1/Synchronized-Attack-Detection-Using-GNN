@@ -32,6 +32,11 @@ PARAMETERS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("model", "use_spatial"): ("ablation", "spatial stream on or off", "true, false"),
     ("model", "fusion"): ("fusion", "how the two streams are combined", "gated, concat"),
     ("model", "fusion_dim"): ("fusion", "size of the fused vector", "32, 64"),
+    ("model", "step_links"): (
+        "temporal stream", "network and storage link to the previous event",
+        "true, false"),
+    ("model", "use_summary"): (
+        "fusion", "whole-episode numbers joined to the fused vector", "true, false"),
     ("model", "dropout"): ("all", "dropout rate", "0.0, 0.1, 0.3"),
     ("model", "device"): ("runtime", "cpu, cuda or auto", "not tuned"),
     ("training", "val_fraction"): ("split", "share of episodes for validation", "0.2"),

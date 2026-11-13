@@ -16,6 +16,7 @@ from torch_geometric.data import Batch, HeteroData
 
 from cadgnn.config import ModelConfig
 from cadgnn.fusion.layers import build_fusion
+from cadgnn.fusion.summary import EpisodeSummary
 from cadgnn.models import DualStreamModel
 from cadgnn.spatial import build_spatial_stream
 from cadgnn.temporal import build_temporal_stream
@@ -39,15 +40,24 @@ class CoordinationModel(nn.Module):
         self.config=config
         self.streams=streams
         self.fusion=fusion
-        self.classifier = nn.Sequential(nn.Dropout(config.dropout), nn.Linear(config.fusion_dim, 1))
+        # With use_summary the fused vector is joined with the episode summary.
+        self.summary = (
+            EpisodeSummary(config.fusion_dim, config.dropout) if config.use_summary else None
+        )
+        width = config.fusion_dim * (2 if config.use_summary else 1)
+        self.classifier = nn.Sequential(nn.Dropout(config.dropout), nn.Linear(width, 1))
 
     def fit_scaler(self, train_graphs: Sequence[HeteroData]) -> CoordinationModel:
         self.streams.fit_scaler(train_graphs)
+        if self.summary is not None:
+            self.summary.fit(train_graphs)
         return self
 
     def forward(self, batch: Batch) -> CoordinationOutput:
         temporal, spatial = self.streams(batch)
         fused, gate = self.fusion(temporal, spatial)
+        if self.summary is not None:
+            fused = torch.cat([fused, self.summary(batch)], dim=-1)
         logit = self.classifier(fused).squeeze(-1)
         return CoordinationOutput(logit, temporal, spatial, gate)
 

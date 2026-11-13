@@ -5,10 +5,12 @@ import torch
 from torch import nn
 from torch_geometric.nn import global_mean_pool
 
+from cadgnn.baselines.features import steps, vm_resources
 from cadgnn.config import ConfigError, ModelConfig
 from cadgnn.graph import InfrastructureGraph, build_episode_graphs, clean_events
 from cadgnn.models import DualStreamModel, NodeEncoder, collate, seed_everything
 from cadgnn.temporal import (
+    LINK_FEATURES,
     TIME_FEATURES,
     TemporalInputError,
     TemporalSeverityStream,
@@ -69,6 +71,31 @@ def test_sequence_follows_event_order_not_storage_order(graphs):
     a = event_sequences(collate([g])).values
     b = event_sequences(collate([shuffled])).values
     assert torch.equal(a, b)
+
+
+def test_link_flags_match_the_baseline_features(graphs):
+    batch = collate(graphs[:8])
+    seq = event_sequences(batch, links=True)
+    width = 4 + len(TIME_FEATURES)
+    assert seq.values.shape[2] == width + len(LINK_FEATURES)
+    assert torch.equal(seq.values[..., :width], event_sequences(batch).values)
+    for i, g in enumerate(graphs[:8]):
+        n = g["vm"].num_nodes
+        flags = seq.values[i, :n, width:]
+        assert (flags[0] == 0).all()
+        either = (flags[1:] > 0).any(dim=1).numpy()
+        assert (either == steps(g).shared).all()
+        network, _ = vm_resources(g)
+        order = torch.argsort(g["vm"].event_order).numpy()
+        same = network[order][1:] == network[order][:-1]
+        assert (flags[1:, 0].numpy() == same).all()
+
+
+def test_links_change_the_stream_input():
+    assert make_stream(links=True).input[0].in_features == 4 + 4
+    assert build_temporal_stream(ModelConfig(step_links=False)).input[0].in_features == 4 + 2
+    with pytest.raises(ConfigError, match="step_links"):
+        ModelConfig(step_links="yes")
 
 
 @pytest.mark.parametrize(

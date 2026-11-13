@@ -16,26 +16,27 @@ from torch_geometric.data import Batch
 
 from cadgnn.config import ModelConfig
 from cadgnn.graph import VM_FEATURES
-from cadgnn.temporal.sequences import TIME_FEATURES, event_sequences
+from cadgnn.temporal.sequences import LINK_FEATURES, TIME_FEATURES, event_sequences
 
 
 class TemporalSeverityStream(nn.Module):
     """GRU over each episode's events in time order.
 
     The GRU runs forwards only, so the state at step t depends on events 0..t.
+    With ``links`` each step also gets the two network and storage link flags.
     The episode vector joins the final state with the mean state over all steps.
     """
 
     def __init__(
         self,  hidden_dim: int,
         out_dim: int, n_features: int = len(VM_FEATURES),
-        num_layers: int = 1,  dropout: float = 0.0
+        num_layers: int = 1,  dropout: float = 0.0, links: bool = False
     ) -> None:
         super().__init__()
         self.out_dim = out_dim
-        self.input = nn.Sequential(
-            nn.Linear(n_features + len(TIME_FEATURES), hidden_dim), nn.ReLU()
-        )
+        self.links = links
+        n_in = n_features + len(TIME_FEATURES) + (len(LINK_FEATURES) if links else 0)
+        self.input = nn.Sequential(nn.Linear(n_in, hidden_dim), nn.ReLU())
         self.gru = nn.GRU(
             hidden_dim,  hidden_dim, num_layers=num_layers,  batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0
@@ -44,7 +45,7 @@ class TemporalSeverityStream(nn.Module):
 
     def step_states(self, batch: Batch) -> tuple[Tensor, Tensor]:
         """GRU state after each event, [num_graphs, max_len, hidden_dim], and the padding mask."""
-        seq = event_sequences(batch)
+        seq = event_sequences(batch, self.links)
         h = self.input(seq.values)
         packed = pack_padded_sequence(h, seq.lengths.cpu(), batch_first=True, enforce_sorted=False)
         out, _ = self.gru(packed)
@@ -62,5 +63,5 @@ class TemporalSeverityStream(nn.Module):
 def build_temporal_stream(config: ModelConfig) -> TemporalSeverityStream:
     return TemporalSeverityStream(
         hidden_dim=config.hidden_dim,  out_dim=config.temporal_dim,  num_layers=config.temporal_layers,
-        dropout=config.dropout
+        dropout=config.dropout, links=config.step_links
     )

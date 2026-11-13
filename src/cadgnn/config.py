@@ -144,6 +144,10 @@ class ModelConfig:
     use_spatial: bool = True
     fusion: str = "gated"
     fusion_dim: int = 64
+    # Give each temporal step its network and storage link to the previous event.
+    step_links: bool = True
+    # Join the fused vector with a few whole-episode numbers before the classifier.
+    use_summary: bool = True
     dropout: float = 0.1
     device: str = "auto"
 
@@ -153,7 +157,7 @@ class ModelConfig:
             "temporal_layers", "spatial_layers", "spatial_heads", "fusion_dim",
         ):  # fmt: skip
             _check_int(getattr(self, name), name, minimum=1)
-        for name in ("use_temporal", "use_spatial"):
+        for name in ("use_temporal", "use_spatial", "step_links", "use_summary"):
             if not isinstance(getattr(self, name), bool):
                 raise ConfigError(f"{name} must be true or false, got {getattr(self, name)!r}")
         if self.architecture not in ARCHITECTURES:
