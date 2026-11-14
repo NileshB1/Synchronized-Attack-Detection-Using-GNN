@@ -1,6 +1,6 @@
-# Coordinated Attack Detection Using GNN
+# Technical details
 
-Research code for deciding whether a group of flagged VM backup anomalies is a coordinated attack campaign or a set of coincidental events, using a dual-stream
+Research code for deciding whether a group of flagged VM backup anomalies is a syncronized attack campaign or a set of coincidental events, using a dual-stream
 (temporal and spatial) graph neural network over an enterprise infrastructure graph.
 
 ## Setup
@@ -376,6 +376,26 @@ The reports hold numbers only. "Beats baseline?" is computed: Y when the propose
 higher mean CV F1 and the paired t-test p-value is below `alpha`. The default spec trains about 50
 GNNs on 1,500 episodes, which takes several hours on a CPU.
 
+## Results dashboard
+
+```bash
+pip install "streamlit>=1.40"
+python run_dashboard.py
+```
+
+A Streamlit app in `dashboard/` that reads the files written by `run_crossval.py` and opens in
+the browser. Charts are drawn with matplotlib. It has three pages:
+
+- **Overview**: the class split, the method in five steps, the headline test scores of the
+  proposed model and one finding per compared model, worded from its p-value;
+- **Model comparison**: the results table, test F1, CV accuracy, false alarms and ROC-AUC per
+  model, precision-recall and ROC curves, confusion matrices and the significance tests;
+- **Ablation and false alarms**: the ablation, the false alarm fixes with the test scores
+  before and after, the share of each episode pattern every model flags, and the training
+  curves per fold.
+
+The output folder can be changed in the sidebar.
+
 ## Layout
 
 ```
@@ -386,6 +406,7 @@ run_evaluation.py     entry point for the held-out evaluation and decision repor
 run_baselines.py      entry point for the rule-based and classic ML baselines
 run_experiments.py    entry point for the comparison experiments
 run_crossval.py       entry point for the cross-validation study
+run_dashboard.py      opens the results dashboard
 configs/              run configurations
 notebooks/            reference notebook for the random anomaly generator (kept unchanged)
 src/cadgnn/
@@ -402,6 +423,7 @@ src/cadgnn/
   experiments/        experiment specs, runner, summaries, parameter table
   crossval/           cross-validation study, significance tests, reports and figures
   config.py, cli.py   configuration and command line
+dashboard/            Streamlit results dashboard (overview and two pages)
 tests/                pytest suite
 ```
 
